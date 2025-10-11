@@ -79,3 +79,29 @@ def get_user_by_id(user_id: str, claims = Depends(verify_token)):
     data = snap.to_dict() or {}
     data["id"] = snap.id
     return _jsonify(data)
+
+# ---------- PATCH /users/me -------------------------------------------------
+from typing import Optional
+from pydantic import constr
+
+class UserPatch(BaseModel):
+    name: Optional[constr(strip_whitespace=True, min_length=1)] = None
+    isAdmin: Optional[bool] = None  # optional—can restrict later if needed
+
+@router.patch("/users/me", summary="Partially update my user (owner-only)")
+def patch_my_user(body: UserPatch, claims = Depends(verify_token)):
+    uid = claims["uid"]
+    ref = db.collection("users").document(uid)
+    snap = ref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    updates = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
+    updates["updatedAt"] = datetime.now(timezone.utc)
+    ref.set(updates, merge=True)
+
+    doc = ref.get()
+    data = doc.to_dict() or {}
+    data["id"] = doc.id
+    return _jsonify(data)
+
