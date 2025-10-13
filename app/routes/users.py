@@ -1,10 +1,8 @@
 # app/routes/users.py
 from datetime import datetime, timezone
 from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, constr
-
 from app.core.firebase import db
 from app.main import verify_token  # adjust if you moved verify_token elsewhere
 
@@ -50,13 +48,19 @@ def upsert_my_user(body: UserIn, claims = Depends(verify_token)):
         "email": email,
         "updatedAt": now,
     }
+
+    # If the user does not exist yet, set createdAt and default isAdmin to False
     if not snap.exists:
         payload["createdAt"] = now
-
-    # 🔒 Only admins may set/modify isAdmin
-    if claims.get("admin", False):
-        payload["isAdmin"] = body.isAdmin
-    # Non-admins: do not include isAdmin (merge=True preserves existing value)
+        if claims.get("admin", False):
+            payload["isAdmin"] = body.isAdmin
+        else:
+            payload["isAdmin"] = False  # ensure always present for first create
+    else:
+        # Existing user: only allow admin to modify isAdmin
+        if claims.get("admin", False):
+            payload["isAdmin"] = body.isAdmin
+        # Non-admins: skip this field so merge=True preserves existing value
 
     ref.set(payload, merge=True)
 
@@ -77,7 +81,7 @@ def patch_my_user(body: UserPatch, claims = Depends(verify_token)):
     # Only include provided, non-null fields
     updates = body.dict(exclude_unset=True, exclude_none=True)
 
-    # 🔒 Prevent privilege escalation
+    # 🔒 Prevent privilege escalation: ignore isAdmin for non-admins
     if "isAdmin" in updates and not claims.get("admin", False):
         updates.pop("isAdmin")
 
