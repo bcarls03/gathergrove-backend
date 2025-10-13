@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <body>
+    <h3>Firebase quick test</h3>
+    <button id="go">Sign in & read my user doc</button>
+    <pre id="out" style="white-space:pre-wrap"></pre>
+
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+      import { getAuth, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-auth.js";
+      import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAHy7QMhAtoaEbZly8mvVn2qE2btmgSPFU",
+  authDomain: "gathergrove-dev.firebaseapp.com",
+  projectId: "gathergrove-dev",
+  storageBucket: "gathergrove-dev.firebasestorage.app",
+  messagingSenderId: "339988898717",
+  appId: "1:339988898717:web:d8a9b6f1ae686d85d0c574"
+};
+
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const db = getFirestore(app);
+      const out = (m) => (document.getElementById("out").textContent += m + "\n");
+
+      const TEST_EMAIL = "brian.carlberg@gmail.com”;
+      const TEST_PASSWORD = "gathergrove”;
+
+      document.getElementById("go").onclick = async () => {
+        try {
+          const { user } = await signInWithEmailAndPassword(auth, TEST_EMAIL, TEST_PASSWORD);
+          out(`Signed in ✅ uid=${user.uid}`);
+
+          const snap = await getDoc(doc(db, "users", user.uid));
+          out(snap.exists()
+            ? `users/${user.uid} → ` + JSON.stringify(snap.data())
+            : `No doc at users/${user.uid}`);
+
+          const idToken = await user.getIdToken();
+          out("ID token (truncated): " + idToken.slice(0, 25) + "...");
+        } catch (e) {
+          out("Error ❌ " + (e.code || "") + " " + e.message);
+        }
+      };
+    </script>
+  </body>
+</html>
