@@ -10,8 +10,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      SKIP_FIREBASE_INIT: "1"   # ✅ Skip Firebase init during CI runs
-      PYTHONPATH: "."           # ✅ Ensure imports like 'from app...' work
+      SKIP_FIREBASE_INIT: "1"   # skip Firebase in CI
+      PYTHONPATH: "."           # make `from app...` imports work
 
     steps:
       - name: Checkout repository
