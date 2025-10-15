@@ -1,7 +1,13 @@
 # 🌿 GatherGrove Backend
 
-[![codecov](https://codecov.io/gh/bcarls03/gathergrove-backend/branch/main/graph/badge.svg)](https://codecov.io/gh/bcarls03/gathergrove-backend)
-[![Run Tests](https://github.com/bcarls03/gathergrove-backend/actions/workflows/tests.yml/badge.svg)](https://github.com/bcarls03/gathergrove-backend/actions)
+<p align="center">
+  <a href="https://codecov.io/gh/bcarls03/gathergrove-backend">
+    <img src="https://codecov.io/gh/bcarls03/gathergrove-backend/branch/main/graph/badge.svg" alt="codecov">
+  </a>
+  <a href="https://github.com/bcarls03/gathergrove-backend/actions/workflows/tests.yml">
+    <img src="https://github.com/bcarls03/gathergrove-backend/actions/workflows/tests.yml/badge.svg" alt="Run Tests">
+  </a>
+</p>
 
 Backend API for the **GatherGrove** app — a private, trust-based neighborhood platform built with **FastAPI + Firebase**.
 
