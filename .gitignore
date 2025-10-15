@@ -1,11 +1,23 @@
+# Python cache and build files
 __pycache__/
 *.py[cod]
 *.egg-info/
+
+# Virtual environment
 .venv/
+
+# Environment variables
 .env
 .env.*
+
+# Firebase secrets and credentials
+secrets/
+*.serviceaccount.json
+
+# macOS
 .DS_Store
+
+# VS Code workspace
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
-secrets/
