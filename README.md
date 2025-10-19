@@ -47,28 +47,22 @@ All endpoints require a valid Firebase **ID token** in the request header:
 -H "Authorization: Bearer <token>"
 ~~~
 
-> ⚠️ **Important Security Note**  
+> ⚠️ **Security note**  
 > The `isAdmin` field is **ignored** unless the caller’s Firebase ID token includes the custom claim:  
 > ~~~json
 > { "admin": true }
 > ~~~  
-> This prevents privilege escalation by non-admin users.  
+> This prevents privilege escalation by non-admin users.
 
 ---
 
-### 🧩 Endpoints
+## 🧩 Users Endpoints
 
-#### **1️⃣ POST `/users`**
+### **1️⃣ POST `/users`** — Create or update your user (owner-only upsert)
 
-**Create or update your user document (owner-only upsert)**
+- **Writes:** `users/{uid}`  
+- **Auto-sets:** `createdAt` (first write), `updatedAt` (always)
 
-- **Purpose:** Create the user record if it doesn’t exist, or update name/email.  
-- **Writes:** `users/{uid}` in Firestore  
-- **Automatically sets:**  
-  - `createdAt` (first write only)  
-  - `updatedAt` (on every request)
-
-**Example request:**
 ~~~bash
 curl -sS -X POST http://127.0.0.1:8000/users \
   -H "Authorization: Bearer $TOKEN" \
@@ -76,29 +70,19 @@ curl -sS -X POST http://127.0.0.1:8000/users \
   -d '{"name":"Brian Carlberg","isAdmin":true}' | python3 -m json.tool
 ~~~
 
-**Example response:**
 ~~~json
 {
   "uid": "abc123UID",
   "email": "brian.carlberg@gmail.com",
   "name": "Brian Carlberg",
-  "isAdmin": false,    // Ignored for non-admins
+  "isAdmin": false,
   "createdAt": "2025-10-06T11:02:09Z",
   "updatedAt": "2025-10-11T15:02:40Z"
 }
 ~~~
 
----
+### **2️⃣ PATCH `/users/me`** — Partially update your own user
 
-#### **2️⃣ PATCH `/users/me`**
-
-**Partially update your own user document**
-
-- **Purpose:** Update one or more fields (e.g., `name`).  
-- **Automatically sets:** `updatedAt`.  
-- **Security:** Ignores `isAdmin` unless caller is admin.
-
-**Example request:**
 ~~~bash
 curl -sS -X PATCH http://127.0.0.1:8000/users/me \
   -H "Authorization: Bearer $TOKEN" \
@@ -106,40 +90,18 @@ curl -sS -X PATCH http://127.0.0.1:8000/users/me \
   -d '{"name":"Brian C."}' | python3 -m json.tool
 ~~~
 
----
+### **3️⃣ GET `/users/me`** — Fetch your own user
 
-#### **3️⃣ GET `/users/me`**
-
-**Fetch your own user document**
-
-**Example request:**
 ~~~bash
 curl -sS -X GET http://127.0.0.1:8000/users/me \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ~~~
 
-**Returns:**
-~~~json
-{
-  "uid": "abc123UID",
-  "email": "brian.carlberg@gmail.com",
-  "name": "Brian C.",
-  "isAdmin": false,
-  "createdAt": "...",
-  "updatedAt": "..."
-}
-~~~
+### **4️⃣ GET `/users/{user_id}`** — Fetch a specific user (owner-only)
 
----
+- **403** if `{user_id}` ≠ caller’s UID  
+- **404** if document doesn’t exist
 
-#### **4️⃣ GET `/users/{user_id}`**
-
-**Fetch a specific user document (owner-only)**
-
-- Returns 403 if `{user_id}` ≠ caller’s UID.  
-- Returns 404 if document doesn’t exist.
-
-**Example request:**
 ~~~bash
 curl -sS -X GET http://127.0.0.1:8000/users/abc123UID \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
@@ -155,9 +117,8 @@ Create and browse neighborhood events. Time fields use **UTC**.
 > • `type: "future"` → **requires** `startAt`  
 > • `type: "now"` → `startAt` defaults to now; `expiresAt` defaults to `startAt + 24h`
 
-### 1) POST `/events` — Create an event (host = current user)
+### 1) **POST `/events`** — Create (host = current user)
 
-**Dev headers example (Swagger):**
 ~~~bash
 curl -sS -X POST http://127.0.0.1:8000/events \
   -H "Content-Type: application/json" \
@@ -171,11 +132,9 @@ curl -sS -X POST http://127.0.0.1:8000/events \
   }' | python3 -m json.tool
 ~~~
 
-### 2) GET `/events` — List upcoming and happening-now
+### 2) **GET `/events`** — List upcoming and happening-now
 
-Query params:  
-- `neighborhood=Bay Hill` (optional)  
-- `type=now|future` (optional)
+Query params: `neighborhood=Bay Hill` (optional), `type=now|future` (optional)
 
 ~~~bash
 curl -sS "http://127.0.0.1:8000/events?type=future&neighborhood=Bay%20Hill" \
@@ -183,14 +142,16 @@ curl -sS "http://127.0.0.1:8000/events?type=future&neighborhood=Bay%20Hill" \
   | python3 -m json.tool
 ~~~
 
-### 3) GET `/events/{event_id}` — Get an event by ID
+### 3) **GET `/events/{event_id}`** — Get by ID
+
 ~~~bash
 curl -sS http://127.0.0.1:8000/events/<EVENT_ID> \
   -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
   | python3 -m json.tool
 ~~~
 
-### 4) POST `/events/{event_id}/rsvp` — RSVP to an event
+### 4) **POST `/events/{event_id}/rsvp`** — RSVP (going/maybe/declined)
+
 Body: `{ "status": "going" | "maybe" | "declined" }`
 
 ~~~bash
@@ -198,6 +159,23 @@ curl -sS -X POST http://127.0.0.1:8000/events/<EVENT_ID>/rsvp \
   -H "Content-Type: application/json" \
   -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
   -d '{"status":"going"}' | python3 -m json.tool
+~~~
+
+### 5) **PATCH `/events/{event_id}`** — Edit (host-only)
+
+~~~bash
+curl -sS -X PATCH http://127.0.0.1:8000/events/<EVENT_ID> \
+  -H "Content-Type: application/json" \
+  -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
+  -d '{"title":"Neighborhood hot cocoa night (updated)"}' | python3 -m json.tool
+~~~
+
+### 6) **DELETE `/events/{event_id}`** — Delete (host or admin)
+
+~~~bash
+curl -sS -X DELETE http://127.0.0.1:8000/events/<EVENT_ID> \
+  -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
+  | python3 -m json.tool
 ~~~
 
 ---
@@ -227,8 +205,9 @@ Each user document includes:
 ## 🧠 Developer Notes
 
 - All timestamps are stored in **UTC** (`datetime.now(timezone.utc)`).  
-- `merge=True` ensures existing fields are preserved during updates.  
+- `merge=True` is used for partial updates to preserve existing fields.  
 - Admin-only behavior is enforced by backend **token claims**, not Firestore field values.  
+- CI uses a Firestore **in-memory fake** when `SKIP_FIREBASE=1` so tests run without cloud access.  
 - For local testing with real tokens, always get a fresh Firebase ID token:
   ~~~bash
   echo "$TOKEN" | wc -c   # should be ~900–1000 chars
@@ -246,16 +225,17 @@ pytest -q
 pytest -q -k test_event_lifecycle
 ~~~
 
-(Current status: tests pass locally.)
+_Current status: tests passing locally and in CI (Python 3.12 & 3.13)._
 
 ---
 
 ### ✅ Next Planned Enhancements
 
+- [ ] People List API: `GET /people` with filters & pagination  
+- [ ] Favorites API: POST/DELETE `/people/{id}/favorite`  
 - [ ] Add `DELETE /users/me` for account removal  
-- [ ] Add admin-only endpoint for viewing all users (e.g. `/users/all`)  
-- [ ] Add pytest coverage: POST → GET → PATCH → forbidden GET → 404 GET  
-- [ ] Event editing (`PATCH /events/{id}`) and stricter validation  
+- [ ] Admin list users endpoint (e.g., `/users/all`)  
+- [ ] More pytest coverage (users + events + auth edge cases)
 
 ---
 
