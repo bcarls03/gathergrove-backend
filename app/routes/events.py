@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
-from pydantic import BaseModel, ConfigDict, Field, constr, AliasChoices
+from pydantic import BaseModel, ConfigDict, Field, constr, model_validator
 
 from app.core.firebase import db
 from app.main import verify_token  # reuse dev/prod auth from main.py
@@ -53,10 +53,26 @@ def _list_docs(coll):
 
 EventType = Literal["now", "future"]
 
+def _normalize_event_keys(v: Any) -> Any:
+    """
+    Accept common variants on incoming JSON:
+      - startsAt -> startAt
+      - endsAt   -> endAt
+      - expireAt -> expiresAt
+    """
+    if isinstance(v, dict):
+        if "startsAt" in v and "startAt" not in v:
+            v["startAt"] = v.pop("startsAt")
+        if "endsAt" in v and "endAt" not in v:
+            v["endAt"] = v.pop("endsAt")
+        if "expireAt" in v and "expiresAt" not in v:
+            v["expiresAt"] = v.pop("expireAt")
+    return v
+
 class EventIn(BaseModel):
     """
-    Input model. Accept camelCase variants on input, emit canonical camelCase
-    on output, while using snake_case in Python code.
+    Input model. We accept a few alias spellings on input, and always serialize
+    with canonical camelCase on output. Internally, we use snake_case.
     """
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -64,27 +80,18 @@ class EventIn(BaseModel):
     title: constr(strip_whitespace=True, min_length=1)
     details: Optional[str] = None
 
-    # Accept either startAt OR startsAt on input, serialize as startAt
-    start_at: Optional[datetime] = Field(
-        None,
-        validation_alias=AliasChoices("startAt", "startsAt"),
-        serialization_alias="startAt",
-    )
-    # Accept endAt OR endsAt, serialize as endAt
-    end_at: Optional[datetime] = Field(
-        None,
-        validation_alias=AliasChoices("endAt", "endsAt"),
-        serialization_alias="endAt",
-    )
-    # Accept expiresAt OR expireAt, serialize as expiresAt
-    expires_at: Optional[datetime] = Field(
-        None,
-        validation_alias=AliasChoices("expiresAt", "expireAt"),
-        serialization_alias="expiresAt",
-    )
+    # Canonical names we serialize with:
+    start_at: Optional[datetime] = Field(None, validation_alias="startAt", serialization_alias="startAt")
+    end_at: Optional[datetime]   = Field(None, validation_alias="endAt",   serialization_alias="endAt")
+    expires_at: Optional[datetime] = Field(None, validation_alias="expiresAt", serialization_alias="expiresAt")
 
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, v: Any) -> Any:
+        return _normalize_event_keys(v)
 
 class EventPatch(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -92,24 +99,17 @@ class EventPatch(BaseModel):
     title: Optional[constr(strip_whitespace=True, min_length=1)] = None
     details: Optional[str] = None
 
-    start_at: Optional[datetime] = Field(
-        None,
-        validation_alias=AliasChoices("startAt", "startsAt"),
-        serialization_alias="startAt",
-    )
-    end_at: Optional[datetime] = Field(
-        None,
-        validation_alias=AliasChoices("endAt", "endsAt"),
-        serialization_alias="endAt",
-    )
-    expires_at: Optional[datetime] = Field(
-        None,
-        validation_alias=AliasChoices("expiresAt", "expireAt"),
-        serialization_alias="expiresAt",
-    )
+    start_at: Optional[datetime] = Field(None, validation_alias="startAt", serialization_alias="startAt")
+    end_at: Optional[datetime]   = Field(None, validation_alias="endAt",   serialization_alias="endAt")
+    expires_at: Optional[datetime] = Field(None, validation_alias="expiresAt", serialization_alias="expiresAt")
 
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: Optional[List[str]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_aliases(cls, v: Any) -> Any:
+        return _normalize_event_keys(v)
 
 class RSVPIn(BaseModel):
     status: Literal["going", "maybe", "declined"]
