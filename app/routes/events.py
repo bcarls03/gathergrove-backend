@@ -229,13 +229,13 @@ def patch_event(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     updates: Dict[str, Any] = {}
-    if body.title is not None:        updates["title"] = body.title.strip()
-    if body.details is not None:      updates["details"] = body.details
-    if body.start_at is not None:     updates["startAt"] = _aware(body.start_at)
-    if body.end_at is not None:       updates["endAt"] = _aware(body.end_at)
-    if body.expires_at is not None:   updates["expiresAt"] = _aware(body.expires_at)
-    if body.capacity is not None:     updates["capacity"] = body.capacity
-    if body.neighborhoods is not None:updates["neighborhoods"] = list(body.neighborhoods)
+    if body.title is not None:         updates["title"] = body.title.strip()
+    if body.details is not None:       updates["details"] = body.details
+    if body.start_at is not None:      updates["startAt"] = _aware(body.start_at)
+    if body.end_at is not None:        updates["endAt"] = _aware(body.end_at)
+    if body.expires_at is not None:    updates["expiresAt"] = _aware(body.expires_at)
+    if body.capacity is not None:      updates["capacity"] = body.capacity
+    if body.neighborhoods is not None: updates["neighborhoods"] = list(body.neighborhoods)
 
     if updates:
         updates["updatedAt"] = _now()
@@ -272,3 +272,40 @@ def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     data = doc.to_dict() or {}
     data["id"] = doc.id
     return _jsonify(data)
+
+@router.delete("/events/{event_id}", summary="Delete an event (host or admin)")
+def delete_event(event_id: str, claims = Depends(verify_token)):
+    # Use coll + ref so we can fall back to the fake's _docs map
+    coll = db.collection("events")
+    ref = coll.document(event_id)
+
+    snap = ref.get()
+    if not snap or not snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    data = snap.to_dict() or {}
+    host_uid = data.get("hostUid")
+    is_owner = host_uid == claims["uid"]
+    is_admin = bool(claims.get("admin"))
+    if not (is_owner or is_admin):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # --- Delete the event (real Firestore OR dev fake) ---
+    if hasattr(ref, "delete"):
+        # real Firestore path
+        ref.delete()
+    elif hasattr(coll, "_docs"):
+        # dev fake path
+        coll._docs.pop(event_id, None)
+
+    # --- (Optional) Cascade delete RSVPs for this event ---
+    rsvp_coll = db.collection("event_attendees")
+    for rid, rec in _list_docs(rsvp_coll):
+        if (rec or {}).get("eventId") == event_id:
+            dref = rsvp_coll.document(rid)
+            if hasattr(dref, "delete"):
+                dref.delete()
+            elif hasattr(rsvp_coll, "_docs"):
+                rsvp_coll._docs.pop(rid, None)
+
+    return {"ok": True, "id": event_id}
