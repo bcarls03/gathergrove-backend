@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
-from pydantic import BaseModel, ConfigDict, Field, constr
+from pydantic import BaseModel, ConfigDict, Field, constr, AliasChoices
 
 from app.core.firebase import db
 from app.main import verify_token  # reuse dev/prod auth from main.py
@@ -55,8 +55,8 @@ EventType = Literal["now", "future"]
 
 class EventIn(BaseModel):
     """
-    Input model. Accept camelCase on input, emit camelCase on output,
-    while using snake_case in Python code.
+    Input model. Accept camelCase variants on input, emit canonical camelCase
+    on output, while using snake_case in Python code.
     """
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -64,15 +64,23 @@ class EventIn(BaseModel):
     title: constr(strip_whitespace=True, min_length=1)
     details: Optional[str] = None
 
-    # camelCase <-> snake_case mapping
+    # Accept either startAt OR startsAt on input, serialize as startAt
     start_at: Optional[datetime] = Field(
-        None, validation_alias="startAt", serialization_alias="startAt"
+        None,
+        validation_alias=AliasChoices("startAt", "startsAt"),
+        serialization_alias="startAt",
     )
+    # Accept endAt OR endsAt, serialize as endAt
     end_at: Optional[datetime] = Field(
-        None, validation_alias="endAt", serialization_alias="endAt"
+        None,
+        validation_alias=AliasChoices("endAt", "endsAt"),
+        serialization_alias="endAt",
     )
+    # Accept expiresAt OR expireAt, serialize as expiresAt
     expires_at: Optional[datetime] = Field(
-        None, validation_alias="expiresAt", serialization_alias="expiresAt"
+        None,
+        validation_alias=AliasChoices("expiresAt", "expireAt"),
+        serialization_alias="expiresAt",
     )
 
     capacity: Optional[int] = Field(None, ge=1)
@@ -85,13 +93,19 @@ class EventPatch(BaseModel):
     details: Optional[str] = None
 
     start_at: Optional[datetime] = Field(
-        None, validation_alias="startAt", serialization_alias="startAt"
+        None,
+        validation_alias=AliasChoices("startAt", "startsAt"),
+        serialization_alias="startAt",
     )
     end_at: Optional[datetime] = Field(
-        None, validation_alias="endAt", serialization_alias="endAt"
+        None,
+        validation_alias=AliasChoices("endAt", "endsAt"),
+        serialization_alias="endAt",
     )
     expires_at: Optional[datetime] = Field(
-        None, validation_alias="expiresAt", serialization_alias="expiresAt"
+        None,
+        validation_alias=AliasChoices("expiresAt", "expireAt"),
+        serialization_alias="expiresAt",
     )
 
     capacity: Optional[int] = Field(None, ge=1)
