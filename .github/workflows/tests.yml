@@ -13,7 +13,7 @@ jobs:
       matrix:
         python-version: ['3.12', '3.13']
     env:
-      SKIP_FIREBASE_INIT: "1"   # skip Firebase init in CI
+      SKIP_FIREBASE_INIT: "1"   # skip Firebase Admin init in CI
       PYTHONPATH: "."           # allow 'from app...' imports
 
     steps:
@@ -40,6 +40,8 @@ jobs:
           pip install -r requirements.txt pytest pytest-cov
 
       - name: Run tests with coverage
+        env:
+          ALLOW_DEV_AUTH: "1"    # <-- enable X-Uid/X-Email/X-Admin in CI
         run: |
           pytest --cov=app --cov-report=xml
 
