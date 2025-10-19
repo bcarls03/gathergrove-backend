@@ -213,6 +213,39 @@ def get_event(
     data["id"] = snap.id
     return _jsonify(data)
 
+@router.patch("/events/{event_id}", summary="Edit an event (host-only)")
+def patch_event(
+    event_id: str,
+    body: EventPatch,
+    claims=Depends(verify_token),
+):
+    ref = db.collection("events").document(event_id)
+    snap = ref.get()
+    if not snap or not snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    current = snap.to_dict() or {}
+    if current.get("hostUid") != claims["uid"] and not claims.get("admin"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    updates: Dict[str, Any] = {}
+    if body.title is not None:        updates["title"] = body.title.strip()
+    if body.details is not None:      updates["details"] = body.details
+    if body.start_at is not None:     updates["startAt"] = _aware(body.start_at)
+    if body.end_at is not None:       updates["endAt"] = _aware(body.end_at)
+    if body.expires_at is not None:   updates["expiresAt"] = _aware(body.expires_at)
+    if body.capacity is not None:     updates["capacity"] = body.capacity
+    if body.neighborhoods is not None:updates["neighborhoods"] = list(body.neighborhoods)
+
+    if updates:
+        updates["updatedAt"] = _now()
+        ref.set(updates, merge=True)
+        snap = ref.get()
+
+    out = snap.to_dict() or {}
+    out["id"] = snap.id
+    return _jsonify(out)
+
 @router.post("/events/{event_id}/rsvp", summary="RSVP to an event (going/maybe/declined)")
 def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     # ensure event exists
