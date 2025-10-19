@@ -54,28 +54,46 @@ def _list_docs(coll):
 EventType = Literal["now", "future"]
 
 class EventIn(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """
+    Input model. Accept camelCase on input, emit camelCase on output,
+    while using snake_case in Python code.
+    """
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     type: EventType
     title: constr(strip_whitespace=True, min_length=1)
     details: Optional[str] = None
-    # For "now": startsAt defaults to now.
-    # For "future": startsAt is required.
-    startsAt: Optional[datetime] = None
-    endsAt: Optional[datetime] = None
-    # For "now": expiresAt defaults to startsAt + 24h.
-    expiresAt: Optional[datetime] = None
+
+    # camelCase <-> snake_case mapping
+    start_at: Optional[datetime] = Field(
+        None, validation_alias="startAt", serialization_alias="startAt"
+    )
+    end_at: Optional[datetime] = Field(
+        None, validation_alias="endAt", serialization_alias="endAt"
+    )
+    expires_at: Optional[datetime] = Field(
+        None, validation_alias="expiresAt", serialization_alias="expiresAt"
+    )
+
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: List[str] = Field(default_factory=list)
 
 class EventPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     title: Optional[constr(strip_whitespace=True, min_length=1)] = None
     details: Optional[str] = None
-    startsAt: Optional[datetime] = None
-    endsAt: Optional[datetime] = None
-    expiresAt: Optional[datetime] = None
+
+    start_at: Optional[datetime] = Field(
+        None, validation_alias="startAt", serialization_alias="startAt"
+    )
+    end_at: Optional[datetime] = Field(
+        None, validation_alias="endAt", serialization_alias="endAt"
+    )
+    expires_at: Optional[datetime] = Field(
+        None, validation_alias="expiresAt", serialization_alias="expiresAt"
+    )
+
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: Optional[List[str]] = None
 
@@ -92,23 +110,24 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 
     # --- Time rules (explicit & defensive) ---
     if body.type == "now":
-        # startsAt defaults to now for "now" events
-        starts_at = _aware(body.startsAt or now)
-        # expiresAt defaults to +24h if not provided
-        expires_at = _aware(body.expiresAt) if body.expiresAt else (starts_at + timedelta(hours=24))
+        # start_at defaults to now for "now" events
+        start_at = _aware(body.start_at or now)
+        # expires_at defaults to +24h if not provided
+        expires_at = _aware(body.expires_at) if body.expires_at else (start_at + timedelta(hours=24))
     else:  # body.type == "future"
-        if body.startsAt is None:
-            raise HTTPException(status_code=400, detail="startsAt is required for future events")
-        starts_at = _aware(body.startsAt)
-        # future events don't require expiresAt
-        expires_at = _aware(body.expiresAt) if body.expiresAt else None
+        if body.start_at is None:
+            raise HTTPException(status_code=400, detail="startAt is required for future events")
+        start_at = _aware(body.start_at)
+        # future events don't require expires_at
+        expires_at = _aware(body.expires_at) if body.expires_at else None
 
     payload: Dict[str, Any] = {
         "type": body.type,
         "title": body.title.strip(),
         "details": body.details,
-        "startsAt": starts_at,
-        "endsAt": _aware(body.endsAt) if body.endsAt else None,
+        # store camelCase in Firestore / JSON
+        "startAt": start_at,
+        "endAt": _aware(body.end_at) if body.end_at else None,
         "expiresAt": expires_at,
         "capacity": body.capacity,
         "neighborhoods": list(body.neighborhoods or []),
@@ -146,14 +165,14 @@ def list_events(
             continue
 
         ev_type = data.get("type")
-        starts_at: Optional[datetime] = data.get("startsAt")
+        start_at: Optional[datetime] = data.get("startAt")
         expires_at: Optional[datetime] = data.get("expiresAt")
 
         keep = False
         if ev_type == "now":
             keep = bool(expires_at and _aware(expires_at) >= now)
         else:  # "future"
-            keep = bool(starts_at and _aware(starts_at) >= now)
+            keep = bool(start_at and _aware(start_at) >= now)
 
         if keep:
             item = dict(data)
@@ -162,7 +181,7 @@ def list_events(
 
     # Sort roughly by when it happens (fallback to createdAt/now)
     def _key(d):
-        return _aware(d.get("startsAt") or d.get("createdAt") or now)
+        return _aware(d.get("startAt") or d.get("createdAt") or now)
 
     items.sort(key=_key)
     return _jsonify(items)
