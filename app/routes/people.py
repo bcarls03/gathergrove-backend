@@ -134,14 +134,19 @@ def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
     uref = db.collection("users").document(uid)
     snap = uref.get()
     if not snap or not getattr(snap, "exists", False):
-        shell = {"uid": uid, "email": email, "favorites": [], "createdAt": _utcnow(), "updatedAt": _utcnow()}
+        shell = {
+            "uid": uid,
+            "email": email,
+            "favorites": [],
+            "createdAt": _utcnow(),
+            "updatedAt": _utcnow(),
+        }
         uref.set(shell, merge=True)
         return shell
     return snap.to_dict() or {"uid": uid, "email": email, "favorites": []}
 
 @router.post(
     "/people/{household_id}/favorite",
-    status_code=204,
     summary="Favorite a household (adds to user.favorites)",
 )
 def favorite_household(household_id: str, claims = Depends(verify_token)):
@@ -152,11 +157,10 @@ def favorite_household(household_id: str, claims = Depends(verify_token)):
     if household_id not in favs:
         favs.append(household_id)
     uref.set({"favorites": favs, "updatedAt": _utcnow()}, merge=True)
-    return  # 204 No Content
+    return {"ok": True, "favorites": favs}
 
 @router.delete(
     "/people/{household_id}/favorite",
-    status_code=204,
     summary="Unfavorite a household (removes from user.favorites)",
 )
 def unfavorite_household(household_id: str, claims = Depends(verify_token)):
@@ -165,4 +169,4 @@ def unfavorite_household(household_id: str, claims = Depends(verify_token)):
     data = _ensure_user_doc(uid, claims.get("email"))
     favs = [f for f in list(data.get("favorites") or []) if f != household_id]
     uref.set({"favorites": favs, "updatedAt": _utcnow()}, merge=True)
-    return  # 204 No Content
+    return {"ok": True, "favorites": favs}
