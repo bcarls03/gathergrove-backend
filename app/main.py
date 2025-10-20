@@ -36,7 +36,6 @@ ALLOW_DEV = os.getenv("ALLOW_DEV_AUTH") == "1"
 SKIP_INIT = os.getenv("SKIP_FIREBASE_INIT") == "1" or os.getenv("SKIP_FIREBASE") == "1"
 IS_CI = os.getenv("CI") == "true"
 
-
 def verify_token(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
     # Dev-only headers (also exposed in Swagger)
@@ -46,20 +45,15 @@ def verify_token(
 ):
     """
     DEV path (ALLOW_DEV_AUTH=1 or SKIP_FIREBASE_INIT=1 or CI=true):
-      - Accept X-Uid/X-Email/X-Admin headers and return claims.
+      - Accept X-Uid/X-Email/X-Admin if provided; otherwise default to a safe dev identity.
     PROD path:
       - Require Authorization: Bearer <idToken> and verify with firebase_admin.auth.
     """
     use_dev_path = ALLOW_DEV or SKIP_INIT or IS_CI
     if use_dev_path:
-        uid = x_uid
-        if not uid:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing dev auth headers (X-Uid required)",
-            )
-        email = x_email or "dev@example.com"
-        admin = str(x_admin or "false").lower() in ("1", "true", "yes", "y", "on")
+        uid = x_uid or os.getenv("DEV_UID") or "dev-uid"
+        email = x_email or os.getenv("DEV_EMAIL") or f"{uid}@example.com"
+        admin = str(x_admin or os.getenv("DEV_ADMIN") or "false").lower() in ("1", "true", "yes", "y", "on")
         return {"uid": uid, "email": email, "admin": admin}
 
     # ---- Production path (real Firebase ID token) ----
@@ -85,17 +79,14 @@ def verify_token(
         "admin": bool(decoded.get("admin")),
     }
 
-
 # ----- Meta routes -----
 @app.get("/health", tags=["meta"])
 def health():
     return {"status": "ok"}
 
-
 @app.get("/", include_in_schema=False)
 def root():
     return {"message": "GatherGrove API running"}
-
 
 @app.get("/firebase", tags=["meta"], summary="Firebase Ping")
 def firebase_ping():
@@ -103,11 +94,9 @@ def firebase_ping():
     list(db.collections())
     return {"ok": True}
 
-
 @app.get("/whoami", tags=["auth"], summary="Whoami")
 def whoami(claims=Depends(verify_token)):
     return claims
-
 
 # ----- Mount routers after verify_token is defined -----
 from app.routes import users
@@ -119,3 +108,5 @@ app.include_router(events.router)
 from app.routes import households
 app.include_router(households.router)
 
+from app.routes import people
+app.include_router(people.router)
