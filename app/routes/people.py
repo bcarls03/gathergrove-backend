@@ -30,8 +30,12 @@ def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
     Ensures: 'type', 'neighborhood', and builds 'childAges' from children.
     """
     out = dict(d)
-    out["type"] = d.get("type") or d.get("householdType") or d.get("kind")
-    out["neighborhood"] = d.get("neighborhood") or d.get("neighborhoodCode")
+
+    # household type (always present in output, may be None)
+    out["type"] = d.get("type") or d.get("householdType") or d.get("kind") or None
+
+    # neighborhood (always present in output, may be None)
+    out["neighborhood"] = d.get("neighborhood") or d.get("neighborhoodCode") or None
 
     # children could be a list of objects like {"age": 7, "sex": "M"} or ints
     raw_children = d.get("children") or []
@@ -42,9 +46,11 @@ def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
         elif isinstance(kid, int):
             child_ages.append(kid)
     out["childAges"] = child_ages
+
     return out
 
 def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optional[int]) -> bool:
+    """Return True if any child age falls within [min_age, max_age]."""
     if not child_ages:
         return False
     for age in child_ages:
@@ -69,7 +75,7 @@ def list_people(
     page_size: int = Query(20, alias="pageSize", ge=1, le=50),
     claims=Depends(verify_token),
 ):
-    # Load households
+    # Load households and normalize
     docs = _list_docs(db.collection("households"))
     rows: List[Dict[str, Any]] = []
     for hid, data in docs:
@@ -83,8 +89,8 @@ def list_people(
             continue
         if type and norm.get("type") != type:
             continue
-        if age_min is not None or age_max is not None:
-            if not _age_match_any(norm["childAges"], age_min, age_max):
+        if (age_min is not None) or (age_max is not None):
+            if not _age_match_any(norm.get("childAges", []), age_min, age_max):
                 continue
 
         rows.append(norm)
@@ -100,15 +106,16 @@ def list_people(
                 start_idx = i + 1
                 break
 
-    page = rows[start_idx:start_idx + page_size]
-    next_token = page[-1]["id"] if (start_idx + page_size) < len(rows) else None
+    page = rows[start_idx : start_idx + page_size]
+    next_token = page[-1]["id"] if (start_idx + page_size) < len(rows) and page else None
 
+    # Shape items: ALWAYS include keys 'type', 'neighborhood', 'childAges'
     items = [
         {
             "id": it["id"],
             "type": it.get("type"),
             "neighborhood": it.get("neighborhood"),
-            "childAges": it.get("childAges", []),
+            "childAges": list(it.get("childAges") or []),
         }
         for it in page
     ]
@@ -116,33 +123,46 @@ def list_people(
     return {"items": items, "nextPageToken": next_token}
 
 # ---------------------------------------------------------------------------
-# Favorites (on the user document)
+# Favorites (on the user document) — fake+real Firestore compatible
 # ---------------------------------------------------------------------------
 
-@router.post("/people/{household_id}/favorite", summary="Favorite a household (adds to user.favorites)")
+def _utcnow():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc)
+
+def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
+    uref = db.collection("users").document(uid)
+    snap = uref.get()
+    if not snap or not getattr(snap, "exists", False):
+        shell = {"uid": uid, "email": email, "favorites": [], "createdAt": _utcnow(), "updatedAt": _utcnow()}
+        uref.set(shell, merge=True)
+        return shell
+    return snap.to_dict() or {"uid": uid, "email": email, "favorites": []}
+
+@router.post(
+    "/people/{household_id}/favorite",
+    status_code=204,
+    summary="Favorite a household (adds to user.favorites)",
+)
 def favorite_household(household_id: str, claims = Depends(verify_token)):
     uid = claims["uid"]
     uref = db.collection("users").document(uid)
-    snap = uref.get()
-    # If user doc doesn't exist, create the basics
-    data = snap.to_dict() or {"uid": uid, "email": claims.get("email")}
+    data = _ensure_user_doc(uid, claims.get("email"))
     favs = list(data.get("favorites") or [])
     if household_id not in favs:
         favs.append(household_id)
-    data["favorites"] = favs
-    uref.set(data, merge=True)
-    return {"ok": True, "favorites": favs}
+    uref.set({"favorites": favs, "updatedAt": _utcnow()}, merge=True)
+    return  # 204 No Content
 
-@router.delete("/people/{household_id}/favorite", summary="Unfavorite a household (removes from user.favorites)")
+@router.delete(
+    "/people/{household_id}/favorite",
+    status_code=204,
+    summary="Unfavorite a household (removes from user.favorites)",
+)
 def unfavorite_household(household_id: str, claims = Depends(verify_token)):
     uid = claims["uid"]
     uref = db.collection("users").document(uid)
-    snap = uref.get()
-    if not snap.exists:
-        raise HTTPException(status_code=404, detail="User not found")
-    data = snap.to_dict() or {}
-    favs = list(data.get("favorites") or [])
-    favs = [f for f in favs if f != household_id]
-    data["favorites"] = favs
-    uref.set(data, merge=True)
-    return {"ok": True, "favorites": favs}
+    data = _ensure_user_doc(uid, claims.get("email"))
+    favs = [f for f in list(data.get("favorites") or []) if f != household_id]
+    uref.set({"favorites": favs, "updatedAt": _utcnow()}, merge=True)
+    return  # 204 No Content
