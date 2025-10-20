@@ -115,3 +115,7 @@ app.include_router(users.router)
 
 from app.routes import events
 app.include_router(events.router)
+
+from app.routes import households
+app.include_router(households.router)
+
