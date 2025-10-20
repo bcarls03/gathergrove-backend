@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from app.main import verify_token
 from app.core.firebase import db
 
@@ -26,23 +26,22 @@ def _list_docs(coll):
 
 def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Normalize field names so responses have stable keys expected by tests.
+    Normalize field names so responses have stable keys expected by clients.
     Ensures: 'type', 'neighborhood', and builds 'childAges' from children.
     """
     out = dict(d)
     out["type"] = d.get("type") or d.get("householdType") or d.get("kind")
     out["neighborhood"] = d.get("neighborhood") or d.get("neighborhoodCode")
 
-    # children could be a list of objects like {"age": 7, "sex": "M"}
+    # children could be a list of objects like {"age": 7, "sex": "M"} or ints
     raw_children = d.get("children") or []
     child_ages: List[int] = []
     for kid in raw_children:
-        if isinstance(kid, dict) and "age" in kid and isinstance(kid["age"], int):
+        if isinstance(kid, dict) and isinstance(kid.get("age"), int):
             child_ages.append(kid["age"])
         elif isinstance(kid, int):
             child_ages.append(kid)
     out["childAges"] = child_ages
-
     return out
 
 def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optional[int]) -> bool:
@@ -57,7 +56,7 @@ def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optio
     return False
 
 # ---------------------------------------------------------------------------
-# Route: GET /people
+# GET /people  (derived from households)
 # ---------------------------------------------------------------------------
 
 @router.get("/people", summary="People list (from households)")
@@ -104,7 +103,6 @@ def list_people(
     page = rows[start_idx:start_idx + page_size]
     next_token = page[-1]["id"] if (start_idx + page_size) < len(rows) else None
 
-    # Minimal fields required by tests/clients
     items = [
         {
             "id": it["id"],
@@ -116,3 +114,35 @@ def list_people(
     ]
 
     return {"items": items, "nextPageToken": next_token}
+
+# ---------------------------------------------------------------------------
+# Favorites (on the user document)
+# ---------------------------------------------------------------------------
+
+@router.post("/people/{household_id}/favorite", summary="Favorite a household (adds to user.favorites)")
+def favorite_household(household_id: str, claims = Depends(verify_token)):
+    uid = claims["uid"]
+    uref = db.collection("users").document(uid)
+    snap = uref.get()
+    # If user doc doesn't exist, create the basics
+    data = snap.to_dict() or {"uid": uid, "email": claims.get("email")}
+    favs = list(data.get("favorites") or [])
+    if household_id not in favs:
+        favs.append(household_id)
+    data["favorites"] = favs
+    uref.set(data, merge=True)
+    return {"ok": True, "favorites": favs}
+
+@router.delete("/people/{household_id}/favorite", summary="Unfavorite a household (removes from user.favorites)")
+def unfavorite_household(household_id: str, claims = Depends(verify_token)):
+    uid = claims["uid"]
+    uref = db.collection("users").document(uid)
+    snap = uref.get()
+    if not snap.exists:
+        raise HTTPException(status_code=404, detail="User not found")
+    data = snap.to_dict() or {}
+    favs = list(data.get("favorites") or [])
+    favs = [f for f in favs if f != household_id]
+    data["favorites"] = favs
+    uref.set(data, merge=True)
+    return {"ok": True, "favorites": favs}
