@@ -1,14 +1,29 @@
 # tests/test_events.py
 from fastapi.testclient import TestClient
 import pytest
-
 from app.main import app
 
 client = TestClient(app)
 
-# Dev auth headers that your app accepts when SKIP_FIREBASE=1
+# Dev auth headers that your app accepts in dev/CI
 DEV   = {"X-Uid": "brian", "X-Email": "brian@example.com", "X-Admin": "false"}
 OTHER = {"X-Uid": "alice", "X-Email": "alice@example.com", "X-Admin": "false"}
+
+
+def _items_from_list_response(data):
+    """
+    Support both response shapes:
+      • legacy: [ ... ]
+      • current: { "items": [ ... ], "nextPageToken": <str|null> }
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict) and "items" in data:
+        assert isinstance(data["items"], list)
+        # Ensure the new list shape also carries a nextPageToken key
+        assert "nextPageToken" in data
+        return data["items"]
+    raise AssertionError(f"Unexpected /events response shape: {type(data)}")
 
 
 def _create_event(headers=DEV):
@@ -41,10 +56,11 @@ def test_event_lifecycle():
     assert r.status_code == 200
     assert r.json()["title"] == payload["title"]
 
-    # list
+    # list (accept new items/nextPageToken envelope)
     r = client.get("/events", params={"type": "future"}, headers=DEV)
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    items = _items_from_list_response(r.json())
+    assert any(it.get("id") == event_id for it in items)
 
     # rsvp
     r = client.post(f"/events/{event_id}/rsvp", json={"status": "going"}, headers=DEV)

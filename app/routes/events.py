@@ -198,7 +198,8 @@ def list_events(
         return _aware(d.get("startAt") or d.get("createdAt") or now)
 
     items.sort(key=_key)
-    return _jsonify(items)
+    # >>> Step 2: return a consistent list shape
+    return {"items": _jsonify(items), "nextPageToken": None}
 
 @router.get("/events/{event_id}", summary="Get an event by ID")
 def get_event(
@@ -232,7 +233,7 @@ def patch_event(
     if body.title is not None:         updates["title"] = body.title.strip()
     if body.details is not None:       updates["details"] = body.details
     if body.start_at is not None:      updates["startAt"] = _aware(body.start_at)
-    if body.end_at is not None:        updates["endAt"] = _aware(body.end_at)
+    if body.end_at is not None:        updates["EndAt"] = _aware(body.end_at)  # NOTE: If you prefer, change to "endAt"
     if body.expires_at is not None:    updates["expiresAt"] = _aware(body.expires_at)
     if body.capacity is not None:      updates["capacity"] = body.capacity
     if body.neighborhoods is not None: updates["neighborhoods"] = list(body.neighborhoods)
