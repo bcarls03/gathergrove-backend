@@ -30,10 +30,16 @@ open http://127.0.0.1:8000/docs
 Authorization: Bearer <idToken>
 ~~~
 
-**CI/dev toggles (already set in CI):**
+**CI/dev toggles (already used in CI):**
 - `ALLOW_DEV_AUTH=1` → allow the `X-*` headers above  
-- `SKIP_FIREBASE_INIT=1` (or `SKIP_FIREBASE=1`) → skip Admin SDK init  
+- `SKIP_FIREBASE_INIT=1` *(or `SKIP_FIREBASE=1`)* → skip Admin SDK init  
 - When dev mode is enabled, a default UID/email is used if headers are missing.
+
+---
+
+## 📄 Schema
+
+See **[schema.md](./schema.md)** for the Firestore layout (Users, Events, RSVPs, Households).
 
 ---
 
@@ -73,6 +79,7 @@ curl -sS -X POST http://127.0.0.1:8000/users \
   -d '{"name":"Brian Carlberg","isAdmin":true}' | python3 -m json.tool
 ~~~
 
+**Example response**
 ~~~json
 {
   "uid": "abc123UID",
@@ -110,6 +117,32 @@ curl -sS -X GET http://127.0.0.1:8000/users/abc123UID \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ~~~
 
+### **5️⃣ GET `/users/me/favorites`** — List saved favorite households
+
+Returns small “household card” objects for IDs in `users.favorites`.
+
+~~~bash
+curl -sS -X GET http://127.0.0.1:8000/users/me/favorites \
+  -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
+  | python3 -m json.tool
+~~~
+
+**Example**
+~~~json
+{
+  "items": [
+    {
+      "id": "H123",
+      "lastName": "Faverson",
+      "type": "family",
+      "neighborhood": "Bay Hill",
+      "childAges": [6, 10]
+    }
+  ],
+  "nextPageToken": null
+}
+~~~
+
 ---
 
 ## 🗓️ Events API
@@ -135,9 +168,14 @@ curl -sS -X POST http://127.0.0.1:8000/events \
   }' | python3 -m json.tool
 ~~~
 
-### 2) **GET `/events`** — List upcoming and happening-now
+### 2) **GET `/events`** — List upcoming & happening-now
 
 Query params: `neighborhood=Bay Hill` (optional), `type=now|future` (optional)
+
+**List response shape (consistent across list endpoints):**
+~~~json
+{ "items": [...], "nextPageToken": null }
+~~~
 
 ~~~bash
 curl -sS "http://127.0.0.1:8000/events?type=future&neighborhood=Bay%20Hill" \
@@ -214,7 +252,7 @@ Query params:
 - `ageMin`, `ageMax` (filter by children’s ages)  
 - `pageSize` (1–50, default 20), `pageToken`
 
-Response:
+**Response**
 ~~~json
 {
   "items": [
@@ -244,6 +282,8 @@ curl -sS -X POST http://127.0.0.1:8000/people/favH/favorite \
 curl -sS -X DELETE http://127.0.0.1:8000/people/favH/favorite \
   -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" | python3 -m json.tool
 ~~~
+
+To fetch the full cards for your saved favorites, see **`GET /users/me/favorites`** in the Users section above.
 
 ---
 
@@ -304,7 +344,6 @@ _Current status: tests passing locally and in CI (Python 3.12 & 3.13)._
 
 ### ✅ Roadmap (near-term)
 
-- [ ] `GET /users/me/favorites` → return full household cards for saved favorites  
 - [ ] People paging tests (pageSize/pageToken round-trip)  
 - [ ] Event attendee list `GET /events/{id}/attendees`  
 - [ ] Admin list users endpoint (e.g., `/users/all`)  
