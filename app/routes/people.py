@@ -1,6 +1,7 @@
 # app/routes/people.py
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -65,6 +66,8 @@ def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optio
 # GET /people  (derived from households)
 # ---------------------------------------------------------------------------
 
+_PAGE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+
 @router.get("/people", summary="People list (from households)")
 def list_people(
     neighborhood: Optional[str] = Query(None, description="Filter to a single neighborhood"),
@@ -75,6 +78,10 @@ def list_people(
     page_size: int = Query(20, alias="pageSize", ge=1, le=50),
     claims=Depends(verify_token),
 ):
+    # Defensive: reject JSON-like or malformed tokens early
+    if page_token is not None and not _PAGE_TOKEN_RE.fullmatch(page_token):
+        raise HTTPException(status_code=400, detail="Invalid pageToken")
+
     # Load households and normalize
     docs = _list_docs(db.collection("households"))
     rows: List[Dict[str, Any]] = []
@@ -98,22 +105,16 @@ def list_people(
     # Sort for stable pagination (lastName then id)
     rows.sort(key=lambda x: ((x.get("lastName") or "").lower(), x.get("id")))
 
-    # Cursor-based pagination (pageToken = last seen id). Be defensive:
+    # Cursor-based pagination (pageToken = last seen id)
     start_idx = 0
     if page_token:
-        tok = page_token.strip()
-        # Reject JSON-ish tokens to avoid accidental shapes
-        if tok.startswith("{") or tok.startswith("["):
-            raise HTTPException(status_code=400, detail="Invalid pageToken")
-        # Find the token in the current filtered/sorted set
-        found_idx = next((i for i, it in enumerate(rows) if it["id"] == tok), None)
-        if found_idx is None:
-            raise HTTPException(status_code=400, detail="Invalid pageToken")
-        start_idx = found_idx + 1
+        for i, it in enumerate(rows):
+            if it["id"] == page_token:
+                start_idx = i + 1
+                break
 
     page = rows[start_idx : start_idx + page_size]
-    has_more = (start_idx + page_size) < len(rows)
-    next_token = page[-1]["id"] if (has_more and page) else None
+    next_token = page[-1]["id"] if (start_idx + page_size) < len(rows) and page else None
 
     # Shape items: ALWAYS include keys 'type', 'neighborhood', 'childAges'
     items = [
@@ -126,7 +127,7 @@ def list_people(
         for it in page
     ]
 
-    return {"items": items, "nextPageToken": next_token or None}
+    return {"items": items, "nextPageToken": next_token}
 
 # ---------------------------------------------------------------------------
 # Favorites (on the user document) — fake+real Firestore compatible
@@ -151,10 +152,7 @@ def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
         return shell
     return snap.to_dict() or {"uid": uid, "email": email, "favorites": []}
 
-@router.post(
-    "/people/{household_id}/favorite",
-    summary="Favorite a household (adds to user.favorites)",
-)
+@router.post("/people/{household_id}/favorite", summary="Favorite a household (adds to user.favorites)")
 def favorite_household(household_id: str, claims = Depends(verify_token)):
     uid = claims["uid"]
     uref = db.collection("users").document(uid)
@@ -165,10 +163,7 @@ def favorite_household(household_id: str, claims = Depends(verify_token)):
     uref.set({"favorites": favs, "updatedAt": _utcnow()}, merge=True)
     return {"ok": True, "favorites": favs}
 
-@router.delete(
-    "/people/{household_id}/favorite",
-    summary="Unfavorite a household (removes from user.favorites)",
-)
+@router.delete("/people/{household_id}/favorite", summary="Unfavorite a household (removes from user.favorites)")
 def unfavorite_household(household_id: str, claims = Depends(verify_token)):
     uid = claims["uid"]
     uref = db.collection("users").document(uid)
