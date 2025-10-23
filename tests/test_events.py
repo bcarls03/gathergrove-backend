@@ -97,3 +97,25 @@ def test_event_delete_host_only():
     r = client.delete(f"/events/{event_id}", headers=DEV)
     assert r.status_code == 200
     assert r.json().get("ok") is True
+
+def test_events_list_shape_dict():
+    # ensure at least one future event exists so the list isn't empty
+    payload = {
+        "type": "future",
+        "title": "Quick check",
+        "details": "shape test",
+        "startAt": "2025-12-15T23:00:00Z",
+        "neighborhoods": ["Bay Hill"],
+    }
+    r = client.post("/events", json=payload, headers=DEV)
+    assert r.status_code in (200, 201), r.text
+
+    # list should return a dict with items + nextPageToken
+    r = client.get("/events", headers=DEV)
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data, dict)
+    assert "items" in data and isinstance(data["items"], list)
+    assert "nextPageToken" in data
+
+
