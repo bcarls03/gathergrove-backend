@@ -7,13 +7,14 @@ client = TestClient(app)
 DEV = {"X-Uid": "brian", "X-Email": "brian@example.com", "X-Admin": "false"}
 
 def ensure_user_and_household():
+    # Ensure a user doc and one household to favorite
     db.collection("users").document("brian").set(
-        {"uid": "brian", "email": "brian@example.com"},
+        {"uid": "brian", "email": "brian@example.com", "favorites": []},
         merge=True,
     )
     db.collection("households").document("favH").set(
         {"lastName": "Fav", "type": "family", "neighborhood": "Bay Hill"},
-        merge=False,
+        merge=True,
     )
 
 def test_favorite_toggle_and_idempotency():
@@ -43,3 +44,13 @@ def test_favorite_toggle_and_idempotency():
     r = client.delete("/people/favH/favorite", headers=DEV)
     assert r.status_code == 200
     assert "favH" not in r.json()["favorites"]
+
+def test_get_my_favorites_empty_shape():
+    # reset the user doc with no favorites
+    db.collection("users").document("brian").set(
+        {"uid": "brian", "email": "brian@example.com", "favorites": []},
+        merge=True,
+    )
+    r = client.get("/users/me/favorites", headers=DEV)
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "nextPageToken": None}
