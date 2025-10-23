@@ -1,8 +1,9 @@
 # app/routes/people.py
 from __future__ import annotations
 
-import re
-from typing import Any, Dict, List, Optional
+import base64
+import json
+from typing import Any, Dict, List, Optional, Tuple, Literal
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from app.main import verify_token
@@ -33,7 +34,12 @@ def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(d)
 
     # household type (always present in output, may be None)
-    out["type"] = d.get("type") or d.get("householdType") or d.get("kind") or None
+    out["type"] = (
+        d.get("type")
+        or d.get("householdType")
+        or d.get("kind")
+        or None
+    )
 
     # neighborhood (always present in output, may be None)
     out["neighborhood"] = d.get("neighborhood") or d.get("neighborhoodCode") or None
@@ -50,82 +56,126 @@ def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
 
     return out
 
+def _child_ages(doc: Dict[str, Any]) -> List[int]:
+    return list(doc.get("childAges") or [])
+
 def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optional[int]) -> bool:
     """Return True if any child age falls within [min_age, max_age]."""
     if not child_ages:
         return False
+    lo = 0 if min_age is None else min_age
+    hi = 18 if max_age is None else max_age
     for age in child_ages:
-        if min_age is not None and age < min_age:
-            continue
-        if max_age is not None and age > max_age:
-            continue
-        return True
+        if lo <= age <= hi:
+            return True
     return False
 
-# ---------------------------------------------------------------------------
-# GET /people  (derived from households)
-# ---------------------------------------------------------------------------
+def _stable_sort(items: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any]]]:
+    """Deterministic order: lastName (casefold) then id."""
+    def key_fn(it):
+        _id, doc = it
+        last = (doc.get("lastName") or doc.get("householdLastName") or "")
+        return (last.casefold(), _id)
+    return sorted(items, key=key_fn)
 
-_PAGE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
+# --- pageToken helpers (base64url: {"cursor":"<docId>"}) ---
+
+def _b64url_encode(d: Dict[str, Any]) -> str:
+    raw = json.dumps(d, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+def _b64url_decode(token: str) -> Dict[str, Any]:
+    try:
+        pad = "=" * ((4 - (len(token) % 4)) % 4)
+        raw = base64.urlsafe_b64decode((token + pad).encode("ascii"))
+        data = json.loads(raw.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError
+        cur = data.get("cursor")
+        if not isinstance(cur, str) or not cur:
+            raise ValueError
+        return data
+    except Exception:
+        # What our tests/clients expect on malformed tokens
+        raise HTTPException(status_code=400, detail="malformed pageToken")
+
+# ---------------------------------------------------------------------------
+# GET /people  (derived from households)  — filters + stable pagination
+# ---------------------------------------------------------------------------
 
 @router.get("/people", summary="People list (from households)")
 def list_people(
+    # filters
     neighborhood: Optional[str] = Query(None, description="Filter to a single neighborhood"),
-    type: Optional[str] = Query(None, description="Household type (e.g., family, emptyNest)"),
-    age_min: Optional[int] = Query(None, alias="ageMin"),
-    age_max: Optional[int] = Query(None, alias="ageMax"),
-    page_token: Optional[str] = Query(None, alias="pageToken", description="Opaque id cursor"),
-    page_size: int = Query(20, alias="pageSize", ge=1, le=50),
+    type: Optional[Literal["family", "empty_nesters", "singles_couples"]] = Query(
+        None, description="Household type"
+    ),
+    minAge: Optional[int] = Query(None, ge=0, le=18, alias="ageMin"),
+    maxAge: Optional[int] = Query(None, ge=0, le=18, alias="ageMax"),
+    search: Optional[str] = Query(None, min_length=1, max_length=64, description="Last name starts-with"),
+    # pagination
+    pageToken: Optional[str] = Query(None, description="Opaque cursor token"),
+    pageSize: int = Query(20, ge=1, le=50),
+    # auth
     claims=Depends(verify_token),
 ):
-    # Defensive: reject JSON-like or malformed tokens early
-    if page_token is not None and not _PAGE_TOKEN_RE.fullmatch(page_token):
-        raise HTTPException(status_code=400, detail="Invalid pageToken")
+    # 1) decode cursor safely (400 on malformed)
+    cursor_id: Optional[str] = None
+    if pageToken is not None:
+        cursor_id = _b64url_decode(pageToken)["cursor"]
 
-    # Load households and normalize
-    docs = _list_docs(db.collection("households"))
-    rows: List[Dict[str, Any]] = []
+    # 2) fetch, normalize, and stable-sort
+    docs = _list_docs(db.collection("households"))  # list[(id, dict)]
+    # normalize now so filters can use normalized fields
+    normed: List[Tuple[str, Dict[str, Any]]] = []
     for hid, data in docs:
         if not data:
             continue
-        norm = _normalize_household(data)
-        norm["id"] = hid
+        n = _normalize_household(data)
+        n["id"] = hid
+        normed.append((hid, n))
 
-        # Filters
-        if neighborhood and norm.get("neighborhood") != neighborhood:
-            continue
-        if type and norm.get("type") != type:
-            continue
-        if (age_min is not None) or (age_max is not None):
-            if not _age_match_any(norm.get("childAges", []), age_min, age_max):
-                continue
+    normed = _stable_sort(normed)
 
-        rows.append(norm)
+    # 3) apply filters BEFORE pagination
+    def _matches(doc: Dict[str, Any]) -> bool:
+        if type and (doc.get("type") != type):
+            return False
+        if neighborhood and (str(doc.get("neighborhood") or "").casefold() != neighborhood.casefold()):
+            return False
+        if search:
+            last = (doc.get("lastName") or doc.get("householdLastName") or "")
+            if not last.casefold().startswith(search.casefold()):
+                return False
+        if (minAge is not None) or (maxAge is not None):
+            if not _age_match_any(_child_ages(doc), minAge, maxAge):
+                return False
+        return True
 
-    # Sort for stable pagination (lastName then id)
-    rows.sort(key=lambda x: ((x.get("lastName") or "").lower(), x.get("id")))
+    filtered = [(hid, d) for (hid, d) in normed if _matches(d)]
 
-    # Cursor-based pagination (pageToken = last seen id)
+    # 4) cursor positioning AFTER filtering (cursor is a doc id)
     start_idx = 0
-    if page_token:
-        for i, it in enumerate(rows):
-            if it["id"] == page_token:
+    if cursor_id:
+        for i, (hid, _) in enumerate(filtered):
+            if hid == cursor_id:
                 start_idx = i + 1
                 break
 
-    page = rows[start_idx : start_idx + page_size]
-    next_token = page[-1]["id"] if (start_idx + page_size) < len(rows) and page else None
-
-    # Shape items: ALWAYS include keys 'type', 'neighborhood', 'childAges'
+    page = filtered[start_idx : start_idx + pageSize]
     items = [
         {
-            "id": it["id"],
-            "type": it.get("type"),
-            "neighborhood": it.get("neighborhood"),
-            "childAges": list(it.get("childAges") or []),
+            "id": d["id"],
+            "type": d.get("type"),
+            "neighborhood": d.get("neighborhood"),
+            "childAges": list(d.get("childAges") or []),
         }
-        for it in page
+        for (_hid, d) in page
     ]
+
+    next_token = None
+    if start_idx + pageSize < len(filtered) and page:
+        next_token = _b64url_encode({"cursor": page[-1][0]})
 
     return {"items": items, "nextPageToken": next_token}
 

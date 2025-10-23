@@ -356,3 +356,4 @@ _Current status: tests passing locally and in CI (Python 3.12 & 3.13)._
 - Firebase Auth + Firestore  
 - Python 3.13  
 - Uvicorn (local dev server)
+ # or small edit
