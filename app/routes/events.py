@@ -81,8 +81,8 @@ class EventIn(BaseModel):
     details: Optional[str] = None
 
     # Canonical names we serialize with:
-    start_at: Optional[datetime] = Field(None, validation_alias="startAt", serialization_alias="startAt")
-    end_at: Optional[datetime]   = Field(None, validation_alias="endAt",   serialization_alias="endAt")
+    start_at: Optional[datetime]   = Field(None, validation_alias="startAt",   serialization_alias="startAt")
+    end_at: Optional[datetime]     = Field(None, validation_alias="endAt",     serialization_alias="endAt")
     expires_at: Optional[datetime] = Field(None, validation_alias="expiresAt", serialization_alias="expiresAt")
 
     capacity: Optional[int] = Field(None, ge=1)
@@ -99,8 +99,8 @@ class EventPatch(BaseModel):
     title: Optional[constr(strip_whitespace=True, min_length=1)] = None
     details: Optional[str] = None
 
-    start_at: Optional[datetime] = Field(None, validation_alias="startAt", serialization_alias="startAt")
-    end_at: Optional[datetime]   = Field(None, validation_alias="endAt",   serialization_alias="endAt")
+    start_at: Optional[datetime]   = Field(None, validation_alias="startAt",   serialization_alias="startAt")
+    end_at: Optional[datetime]     = Field(None, validation_alias="endAt",     serialization_alias="endAt")
     expires_at: Optional[datetime] = Field(None, validation_alias="expiresAt", serialization_alias="expiresAt")
 
     capacity: Optional[int] = Field(None, ge=1)
@@ -198,7 +198,7 @@ def list_events(
         return _aware(d.get("startAt") or d.get("createdAt") or now)
 
     items.sort(key=_key)
-    # >>> Step 2: return a consistent list shape
+    # Consistent list shape for clients/tests
     return {"items": _jsonify(items), "nextPageToken": None}
 
 @router.get("/events/{event_id}", summary="Get an event by ID")
@@ -230,13 +230,21 @@ def patch_event(
         raise HTTPException(status_code=403, detail="Forbidden")
 
     updates: Dict[str, Any] = {}
-    if body.title is not None:         updates["title"] = body.title.strip()
-    if body.details is not None:       updates["details"] = body.details
-    if body.start_at is not None:      updates["startAt"] = _aware(body.start_at)
-    if body.end_at is not None:        updates["EndAt"] = _aware(body.end_at)  # NOTE: If you prefer, change to "endAt"
-    if body.expires_at is not None:    updates["expiresAt"] = _aware(body.expires_at)
-    if body.capacity is not None:      updates["capacity"] = body.capacity
-    if body.neighborhoods is not None: updates["neighborhoods"] = list(body.neighborhoods)
+    if body.title is not None:
+        updates["title"] = body.title.strip()
+    if body.details is not None:
+        updates["details"] = body.details
+    if body.start_at is not None:
+        updates["startAt"] = _aware(body.start_at)
+    if body.end_at is not None:
+        # FIX: ensure the correct camelCase key 'endAt'
+        updates["endAt"] = _aware(body.end_at)
+    if body.expires_at is not None:
+        updates["expiresAt"] = _aware(body.expires_at)
+    if body.capacity is not None:
+        updates["capacity"] = body.capacity
+    if body.neighborhoods is not None:
+        updates["neighborhoods"] = list(body.neighborhoods)
 
     if updates:
         updates["updatedAt"] = _now()
