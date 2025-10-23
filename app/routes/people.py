@@ -98,16 +98,22 @@ def list_people(
     # Sort for stable pagination (lastName then id)
     rows.sort(key=lambda x: ((x.get("lastName") or "").lower(), x.get("id")))
 
-    # Cursor-based pagination (pageToken = last seen id)
+    # Cursor-based pagination (pageToken = last seen id). Be defensive:
     start_idx = 0
     if page_token:
-        for i, it in enumerate(rows):
-            if it["id"] == page_token:
-                start_idx = i + 1
-                break
+        tok = page_token.strip()
+        # Reject JSON-ish tokens to avoid accidental shapes
+        if tok.startswith("{") or tok.startswith("["):
+            raise HTTPException(status_code=400, detail="Invalid pageToken")
+        # Find the token in the current filtered/sorted set
+        found_idx = next((i for i, it in enumerate(rows) if it["id"] == tok), None)
+        if found_idx is None:
+            raise HTTPException(status_code=400, detail="Invalid pageToken")
+        start_idx = found_idx + 1
 
     page = rows[start_idx : start_idx + page_size]
-    next_token = page[-1]["id"] if (start_idx + page_size) < len(rows) and page else None
+    has_more = (start_idx + page_size) < len(rows)
+    next_token = page[-1]["id"] if (has_more and page) else None
 
     # Shape items: ALWAYS include keys 'type', 'neighborhood', 'childAges'
     items = [
@@ -120,7 +126,7 @@ def list_people(
         for it in page
     ]
 
-    return {"items": items, "nextPageToken": next_token}
+    return {"items": items, "nextPageToken": next_token or None}
 
 # ---------------------------------------------------------------------------
 # Favorites (on the user document) — fake+real Firestore compatible
