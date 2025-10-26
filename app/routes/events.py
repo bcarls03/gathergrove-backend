@@ -52,6 +52,7 @@ def _list_docs(coll):
 # ---------------------------------------------------------------------------
 
 EventType = Literal["now", "future"]
+Category  = Literal["neighborhood", "playdate", "help", "pet", "other"]
 
 def _normalize_event_keys(v: Any) -> Any:
     """
@@ -88,6 +89,14 @@ class EventIn(BaseModel):
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: List[str] = Field(default_factory=list)
 
+    # NEW: category (optional on input; default set server-side to "other")
+    category: Optional[Category] = Field(
+        default=None,
+        validation_alias="category",
+        serialization_alias="category",
+        description='One of: "neighborhood", "playdate", "help", "pet", "other"',
+    )
+
     @model_validator(mode="before")
     @classmethod
     def _coerce_aliases(cls, v: Any) -> Any:
@@ -105,6 +114,13 @@ class EventPatch(BaseModel):
 
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: Optional[List[str]] = None
+
+    # NEW: allow updating category
+    category: Optional[Category] = Field(
+        default=None,
+        validation_alias="category",
+        serialization_alias="category",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -145,6 +161,8 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
         "expiresAt": expires_at,
         "capacity": body.capacity,
         "neighborhoods": list(body.neighborhoods or []),
+        # NEW: category (default to "other" if not provided)
+        "category": body.category or "other",
         "hostUid": claims["uid"],
         "createdAt": now,
         "updatedAt": now,
@@ -163,6 +181,7 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 def list_events(
     neighborhood: Optional[str] = Query(None, description="Filter to a single neighborhood"),
     type: Optional[EventType] = Query(None, description='Filter by "now" or "future"'),
+    category: Optional[Category] = Query(None, description='Filter by category (neighborhood|playdate|help|pet|other)'),  # NEW
     claims=Depends(verify_token),
 ):
     now = _now()
@@ -176,6 +195,8 @@ def list_events(
         if neighborhood and neighborhood not in (data.get("neighborhoods") or []):
             continue
         if type and data.get("type") != type:
+            continue
+        if category and data.get("category") != category:  # NEW
             continue
 
         ev_type = data.get("type")
@@ -237,7 +258,7 @@ def patch_event(
     if body.start_at is not None:
         updates["startAt"] = _aware(body.start_at)
     if body.end_at is not None:
-        # FIX: ensure the correct camelCase key 'endAt'
+        # ensure the correct camelCase key 'endAt'
         updates["endAt"] = _aware(body.end_at)
     if body.expires_at is not None:
         updates["expiresAt"] = _aware(body.expires_at)
@@ -245,6 +266,9 @@ def patch_event(
         updates["capacity"] = body.capacity
     if body.neighborhoods is not None:
         updates["neighborhoods"] = list(body.neighborhoods)
+    # NEW: category update
+    if body.category is not None:
+        updates["category"] = body.category
 
     if updates:
         updates["updatedAt"] = _now()
@@ -318,3 +342,40 @@ def delete_event(event_id: str, claims = Depends(verify_token)):
                 rsvp_coll._docs.pop(rid, None)
 
     return {"ok": True, "id": event_id}
+
+@router.patch("/events/{event_id}")
+def patch_event(
+    event_id: str,
+    payload: Dict[str, Any],
+    claims: dict = Depends(verify_token),
+):
+    ref = db.collection("events").document(event_id)
+    doc = ref.get()
+    if not doc.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    event = doc.to_dict()
+
+    # Permission check
+    uid = claims.get("uid")
+    is_admin = claims.get("admin", False)
+    if not (uid == event.get("hostUid") or is_admin):
+        raise HTTPException(status_code=403, detail="Not allowed to edit")
+
+    # Only allow safe fields to be updated
+    editable_fields = {
+        "title", "details", "startAt", "endAt",
+        "category", "capacity", "neighborhoods"
+    }
+    updates = {k: v for k, v in payload.items() if k in editable_fields}
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No editable fields provided")
+
+    updates["updatedAt"] = datetime.now(timezone.utc).isoformat()
+    ref.update(updates)
+
+    # Return merged record
+    event.update(updates)
+    return {"ok": True, "event": event}
+
