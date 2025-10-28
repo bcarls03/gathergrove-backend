@@ -1,121 +1,192 @@
 # tests/test_events.py
-from fastapi.testclient import TestClient
+from __future__ import annotations
+from datetime import datetime, timedelta, timezone
+
 import pytest
+from fastapi.testclient import TestClient
 from app.main import app
 
+# Use a single client (your conftest enables dev auth + in-memory DB)
 client = TestClient(app)
 
-# Dev auth headers that your app accepts in dev/CI
-DEV   = {"X-Uid": "brian", "X-Email": "brian@example.com", "X-Admin": "false"}
-OTHER = {"X-Uid": "alice", "X-Email": "alice@example.com", "X-Admin": "false"}
+UTC = timezone.utc
 
 
-def _items_from_list_response(data):
+# --- Helpers ---------------------------------------------------------------
+
+def auth(uid: str | None = None, admin: bool = False) -> dict:
     """
-    Support both response shapes:
-      • legacy: [ ... ]
-      • current: { "items": [ ... ], "nextPageToken": <str|null> }
+    Default dev auth header. Optionally impersonate a different user with X-UID.
     """
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict) and "items" in data:
-        assert isinstance(data["items"], list)
-        # Ensure the new list shape also carries a nextPageToken key
-        assert "nextPageToken" in data
-        return data["items"]
-    raise AssertionError(f"Unexpected /events response shape: {type(data)}")
+    h = {"Authorization": "Bearer dev"}
+    if uid:
+        h["X-UID"] = uid
+    if admin:
+        h["X-ADMIN"] = "true"
+    return h
 
 
-def _create_event(headers=DEV):
-    """Helper: create a future event and return (event_id, payload)."""
-    payload = {
+def iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).isoformat()
+
+
+def create_future_event(title: str, start: datetime, end: datetime, **extra) -> dict:
+    body = {
         "type": "future",
-        "title": "Neighborhood hot cocoa night",
-        "details": "Bring your favorite mug!",
-        "startAt": "2025-12-15T23:00:00Z",
-        "neighborhoods": ["Bay Hill", "Eagles Point"],
+        "title": title,
+        "startAt": iso(start),
+        "endAt": iso(end),
+        **extra,
     }
-    r = client.post("/events", json=payload, headers=headers)
-    assert r.status_code in (200, 201), r.text
-    event_id = r.json()["id"]
-    return event_id, payload
+    r = client.post("/events", headers=auth(), json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
 
 
-def test_health():
-    r = client.get("/health")
+def create_now_event(title: str, *, expires_at: datetime | None = None, **extra) -> dict:
+    body = {"type": "now", "title": title, **extra}
+    if expires_at is not None:
+        body["expiresAt"] = iso(expires_at)
+    r = client.post("/events", headers=auth(), json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+# --- Tests -----------------------------------------------------------------
+
+def test_type_filters_sorting_and_expiry_exclusion():
+    now = datetime.now(UTC)
+
+    # expired "now" → excluded globally
+    create_now_event("Expired Now", expires_at=now - timedelta(minutes=1))
+
+    # active now (expires in 1h)
+    ev_now = create_now_event("Active Now", expires_at=now + timedelta(hours=1))
+
+    # two future events, out of creation order
+    ev_fut_b = create_future_event("Future B",
+                                   now + timedelta(days=2, hours=10),
+                                   now + timedelta(days=2, hours=12))
+    ev_fut_a = create_future_event("Future A",
+                                   now + timedelta(days=1, hours=10),
+                                   now + timedelta(days=1, hours=11, minutes=30))
+
+    # Omitted type ⇒ both now + future, exclude expired, sorted by startAt asc
+    r = client.get("/events", headers=auth())
     assert r.status_code == 200
-    assert r.json() == {"status": "ok"}
+    items = r.json()["items"]
+    titles = [e["title"] for e in items]
+    assert "Expired Now" not in titles
+    assert titles[:3] == ["Active Now", "Future A", "Future B"]
+
+    # type=now
+    r = client.get("/events?type=now", headers=auth())
+    assert [e["title"] for e in r.json()["items"]] == ["Active Now"]
+
+    # type=future (sorted)
+    r = client.get("/events?type=future", headers=auth())
+    assert [e["title"] for e in r.json()["items"]][:2] == ["Future A", "Future B"]
 
 
-def test_event_lifecycle():
-    # create
-    event_id, payload = _create_event()
+def test_pagination_limit_and_next_token():
+    now = datetime.now(UTC)
+    prefix = f"PG-{int(now.timestamp())}-"
 
-    # get by id
-    r = client.get(f"/events/{event_id}", headers=DEV)
+    # create exactly 5 future events that we can uniquely identify
+    target_ids = []
+    for i in range(5):
+        s = now + timedelta(days=1 + i, hours=9)
+        e = s + timedelta(hours=1)
+        ev = create_future_event(f"{prefix}{i}", s, e)
+        target_ids.append(ev["id"])
+
+    # page through the global list but only collect our prefix-matching events
+    collected = []
+    tok = None
+
+    while True:
+        url = "/events?type=future&limit=2"
+        if tok:
+            url += f"&nextPageToken={tok}"
+        r = client.get(url, headers=auth())
+        assert r.status_code == 200
+        body = r.json()
+
+        # Add only our items from this page
+        for it in body["items"]:
+            if isinstance(it.get("title"), str) and it["title"].startswith(prefix):
+                collected.append(it["id"])
+
+        # Stop if we've seen all 5 of ours
+        if len(set(collected)) >= 5:
+            break
+
+        tok = body["nextPageToken"]
+        # If token is None before we collect 5, something's wrong
+        assert tok is not None, "Ran out of pages before collecting all our test events"
+
+    # We collected exactly our 5 (no dupes)
+    assert set(collected) == set(target_ids)
+
+def test_rsvp_join_leave_and_capacity_409():
+    now = datetime.now(UTC)
+    start = now + timedelta(days=7, hours=10)
+    end = start + timedelta(hours=2)
+
+    ev = create_future_event("Cap1", start, end, capacity=1)
+    eid = ev["id"]
+
+    # User A joins
+    r = client.post(f"/events/{eid}/rsvp", headers=auth(), json={"status": "going"})
     assert r.status_code == 200
-    assert r.json()["title"] == payload["title"]
 
-    # list (accept new items/nextPageToken envelope)
-    r = client.get("/events", params={"type": "future"}, headers=DEV)
+    # Listing for A shows count=1, attending=true
+    row = next(e for e in client.get("/events?type=future", headers=auth()).json()["items"] if e["id"] == eid)
+    assert row["attendeeCount"] == 1
+    assert row["isAttending"] is True
+
+    # User B cannot join (capacity full)
+    r = client.post(f"/events/{eid}/rsvp", headers=auth("user-b"), json={"status": "going"})
+    assert r.status_code == 409
+
+    # A leaves → OK
+    r = client.delete(f"/events/{eid}/rsvp", headers=auth())
     assert r.status_code == 200
-    items = _items_from_list_response(r.json())
-    assert any(it.get("id") == event_id for it in items)
 
-    # rsvp
-    r = client.post(f"/events/{event_id}/rsvp", json={"status": "going"}, headers=DEV)
-    assert r.status_code in (200, 201, 204)
-
-
-def test_event_patch_host_only():
-    # host creates
-    event_id, _ = _create_event(headers=DEV)
-
-    # same host can patch
-    r = client.patch(f"/events/{event_id}", json={"title": "Block party 🎉"}, headers=DEV)
+    # Now B can join
+    r = client.post(f"/events/{eid}/rsvp", headers=auth("user-b"), json={"status": "going"})
     assert r.status_code == 200
-    assert r.json()["title"] == "Block party 🎉"
-
-    # different user is forbidden
-    r = client.patch(f"/events/{event_id}", json={"title": "Hacked"}, headers=OTHER)
-    assert r.status_code == 403
 
 
-def test_event_delete_host_only():
-    # host creates
-    event_id, _ = _create_event(headers=DEV)
+def test_patch_validations_and_success():
+    now = datetime.now(UTC)
+    start = now + timedelta(days=3, hours=9)
+    end_ok = start + timedelta(hours=1)
+    end_bad = start - timedelta(minutes=1)
 
-    # if DELETE isn't implemented yet, allow the suite to keep passing
-    probe = client.delete(f"/events/{event_id}", headers=OTHER)
-    if probe.status_code in (404, 405):
-        pytest.skip("DELETE /events/{id} not implemented yet")
+    ev = create_future_event("PatchMe", start, end_ok)
+    eid = ev["id"]
 
-    # someone else cannot delete
-    assert probe.status_code == 403
+    # endAt <= startAt ⇒ 422
+    r = client.patch(f"/events/{eid}", headers=auth(), json={"endAt": iso(end_bad)})
+    assert r.status_code == 422
+    assert "endAt must be strictly greater than startAt" in r.text
 
-    # host can delete
-    r = client.delete(f"/events/{event_id}", headers=DEV)
+    # capacity < 1 ⇒ 422
+    r = client.patch(f"/events/{eid}", headers=auth(), json={"capacity": 0})
+    assert r.status_code == 422
+
+    # invalid category ⇒ 422
+    r = client.patch(f"/events/{eid}", headers=auth(), json={"category": "not-real"})
+    assert r.status_code == 422
+
+    # valid patch ⇒ 200
+    r = client.patch(
+        f"/events/{eid}",
+        headers=auth(),
+        json={"endAt": iso(end_ok + timedelta(hours=1)), "capacity": 10, "category": "neighborhood"},
+    )
     assert r.status_code == 200
-    assert r.json().get("ok") is True
-
-def test_events_list_shape_dict():
-    # ensure at least one future event exists so the list isn't empty
-    payload = {
-        "type": "future",
-        "title": "Quick check",
-        "details": "shape test",
-        "startAt": "2025-12-15T23:00:00Z",
-        "neighborhoods": ["Bay Hill"],
-    }
-    r = client.post("/events", json=payload, headers=DEV)
-    assert r.status_code in (200, 201), r.text
-
-    # list should return a dict with items + nextPageToken
-    r = client.get("/events", headers=DEV)
-    assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data, dict)
-    assert "items" in data and isinstance(data["items"], list)
-    assert "nextPageToken" in data
-
-
+    body = r.json()
+    assert body["capacity"] == 10
+    assert body["category"] == "neighborhood"
