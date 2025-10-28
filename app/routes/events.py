@@ -47,6 +47,24 @@ def _list_docs(coll):
         return list(coll._docs.items())
     return []
 
+def _attendee_stats(event_id: str, uid: str) -> Dict[str, Any]:
+    """
+    Scan event_attendees for this event.
+    Returns: {"countGoing": int, "userStatus": Optional[str]}
+    """
+    coll = db.collection("event_attendees")
+    count_going = 0
+    user_status = None
+    for rid, rec in _list_docs(coll):
+        if not rec or rec.get("eventId") != event_id:
+            continue
+        status = rec.get("status")
+        if status == "going":
+            count_going += 1
+        if rec.get("uid") == uid:
+            user_status = status
+    return {"countGoing": count_going, "userStatus": user_status}
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -89,7 +107,7 @@ class EventIn(BaseModel):
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: List[str] = Field(default_factory=list)
 
-    # NEW: category (optional on input; default set server-side to "other")
+    # category (optional on input; default set server-side to "other")
     category: Optional[Category] = Field(
         default=None,
         validation_alias="category",
@@ -115,7 +133,6 @@ class EventPatch(BaseModel):
     capacity: Optional[int] = Field(None, ge=1)
     neighborhoods: Optional[List[str]] = None
 
-    # NEW: allow updating category
     category: Optional[Category] = Field(
         default=None,
         validation_alias="category",
@@ -161,7 +178,6 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
         "expiresAt": expires_at,
         "capacity": body.capacity,
         "neighborhoods": list(body.neighborhoods or []),
-        # NEW: category (default to "other" if not provided)
         "category": body.category or "other",
         "hostUid": claims["uid"],
         "createdAt": now,
@@ -179,48 +195,136 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 
 @router.get("/events", summary="List upcoming and happening-now events")
 def list_events(
+    # Time window; omitted = both
+    type: Optional[str] = Query(None, pattern="^(now|future)$", description="Filter by time window"),
     neighborhood: Optional[str] = Query(None, description="Filter to a single neighborhood"),
-    type: Optional[EventType] = Query(None, description='Filter by "now" or "future"'),
-    category: Optional[Category] = Query(None, description='Filter by category (neighborhood|playdate|help|pet|other)'),  # NEW
-    claims=Depends(verify_token),
+    category: Optional[Category] = Query(None, description='Filter by category (neighborhood|playdate|help|pet|other)'),
+    # Pagination
+    limit: int = Query(20, ge=1, le=50),
+    nextPageToken: Optional[str] = Query(None, description="Opaque cursor from previous page"),
+    claims: dict = Depends(verify_token),
 ):
+    """
+    - Excludes expired events (expiresAt <= now)
+    - Time-window logic (independent of stored `type` field):
+        * type=now     -> startAt <= now < endAt|expiresAt
+        * type=future  -> startAt > now
+        * omitted      -> both of the above; still excludes past/expired
+    - Sorted by startAt ascending (fallback: createdAt, then now)
+    - Pagination via nextPageToken (URL-safe base64 of 'ISO_START|ID')
+    - Enrich each item with attendeeCount and isAttending
+    """
+    import base64
+
+    def _encode_token(start: datetime, eid: str) -> str:
+        raw = f"{_aware(start).isoformat()}|{eid}".encode("utf-8")
+        return base64.urlsafe_b64encode(raw).decode("utf-8")
+
+    def _decode_token(tok: str) -> Optional[tuple[datetime, str]]:
+        try:
+            raw = base64.urlsafe_b64decode(tok.encode("utf-8")).decode("utf-8")
+            iso, eid = raw.split("|", 1)
+            if iso.endswith("Z"):
+                iso = iso[:-1] + "+00:00"
+            return (datetime.fromisoformat(iso), eid)
+        except Exception:
+            return None
+
     now = _now()
     coll = db.collection("events")
-    items = []
+
+    def _end_boundary(d: Dict[str, Any]) -> Optional[datetime]:
+        """Prefer endAt; fall back to expiresAt; return aware or None."""
+        end = d.get("endAt") or d.get("expiresAt")
+        if isinstance(end, datetime):
+            return _aware(end)
+        return None
+
+    # --- Pull + filter ------------------------------------------------------
+    filtered: List[Dict[str, Any]] = []
     for eid, data in _list_docs(coll):
         if not data:
             continue
 
-        # filters
+        # Exclude globally expired (explicit requirement)
+        exp = data.get("expiresAt")
+        if isinstance(exp, datetime) and _aware(exp) <= now:
+            continue
+
+        # Field filters
         if neighborhood and neighborhood not in (data.get("neighborhoods") or []):
             continue
-        if type and data.get("type") != type:
-            continue
-        if category and data.get("category") != category:  # NEW
+        if category and data.get("category") != category:
             continue
 
-        ev_type = data.get("type")
-        start_at: Optional[datetime] = data.get("startAt")
-        expires_at: Optional[datetime] = data.get("expiresAt")
+        # Window logic
+        start_raw = data.get("startAt")
+        start_at = _aware(start_raw) if isinstance(start_raw, datetime) else None
+        end_at = _end_boundary(data)
 
-        keep = False
-        if ev_type == "now":
-            keep = bool(expires_at and _aware(expires_at) >= now)
-        else:  # "future"
-            keep = bool(start_at and _aware(start_at) >= now)
+        is_now = bool(start_at and end_at and (start_at <= now < end_at))
+        is_future = bool(start_at and (start_at > now))
 
-        if keep:
-            item = dict(data)
-            item["id"] = eid
-            items.append(item)
+        if type == "now" and not is_now:
+            continue
+        if type == "future" and not is_future:
+            continue
+        if type is None and not (is_now or is_future):
+            continue
 
-    # Sort roughly by when it happens (fallback to createdAt/now)
-    def _key(d):
-        return _aware(d.get("startAt") or d.get("createdAt") or now)
+        item = dict(data)
+        item["id"] = eid
 
-    items.sort(key=_key)
-    # Consistent list shape for clients/tests
-    return {"items": _jsonify(items), "nextPageToken": None}
+        # Enrich with RSVP stats for the caller
+        stats = _attendee_stats(eid, claims["uid"])
+        item["attendeeCount"] = stats["countGoing"]
+        item["isAttending"] = (stats["userStatus"] == "going")
+
+        filtered.append(item)
+
+    # --- Sort ---------------------------------------------------------------
+    def _sort_key(d: Dict[str, Any]) -> datetime:
+        sa = d.get("startAt")
+        if isinstance(sa, datetime):
+            return _aware(sa)
+        ca = d.get("createdAt")
+        if isinstance(ca, datetime):
+            return _aware(ca)
+        return now
+
+    filtered.sort(key=_sort_key)
+
+    # --- Apply cursor -------------------------------------------------------
+    start_index = 0
+    if nextPageToken:
+        decoded = _decode_token(nextPageToken)
+        if decoded:
+            tok_start, tok_id = decoded
+            for i, d in enumerate(filtered):
+                d_start = d.get("startAt")
+                d_id = d.get("id")
+                d_key = (_aware(d_start) if isinstance(d_start, datetime) else now, d_id)
+                tok_key = (_aware(tok_start), tok_id)
+                if d_key > tok_key:
+                    start_index = i
+                    break
+            else:
+                return {"items": [], "nextPageToken": None}
+        else:
+            start_index = 0  # bad token ⇒ treat as first page
+
+    page = filtered[start_index:start_index + limit]
+
+    # --- Compute next token -------------------------------------------------
+    next_token = None
+    if start_index + limit < len(filtered):
+        last = page[-1]
+        last_start = last.get("startAt") or last.get("createdAt") or now
+        if not isinstance(last_start, datetime):
+            last_start = now
+        next_token = _encode_token(last_start, last["id"])
+
+    return {"items": _jsonify(page), "nextPageToken": next_token}
 
 @router.get("/events/{event_id}", summary="Get an event by ID")
 def get_event(
@@ -250,6 +354,30 @@ def patch_event(
     if current.get("hostUid") != claims["uid"] and not claims.get("admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
+    # --- Compute effective values (overlay patch onto current) -------------
+    def _as_dt(v):
+        return _aware(v) if isinstance(v, datetime) else None
+
+    effective_start = _as_dt(body.start_at) if body.start_at is not None else _as_dt(current.get("startAt"))
+    effective_end   = _as_dt(body.end_at)   if body.end_at   is not None else _as_dt(current.get("endAt"))
+
+    # --- Validations --------------------------------------------------------
+    # capacity
+    if body.capacity is not None and body.capacity < 1:
+        raise HTTPException(status_code=422, detail="capacity must be ≥ 1")
+
+    # category
+    if body.category is not None:
+        allowed = {"neighborhood", "playdate", "help", "pet", "other"}
+        if body.category not in allowed:
+            raise HTTPException(status_code=422, detail=f"category must be one of {sorted(allowed)}")
+
+    # times
+    if effective_start is not None and effective_end is not None:
+        if effective_end <= effective_start:
+            raise HTTPException(status_code=422, detail="endAt must be strictly greater than startAt")
+
+    # --- Build update payload (always store UTC-aware datetimes) -----------
     updates: Dict[str, Any] = {}
     if body.title is not None:
         updates["title"] = body.title.strip()
@@ -258,15 +386,15 @@ def patch_event(
     if body.start_at is not None:
         updates["startAt"] = _aware(body.start_at)
     if body.end_at is not None:
-        # ensure the correct camelCase key 'endAt'
         updates["endAt"] = _aware(body.end_at)
     if body.expires_at is not None:
+        updates["ExpiresAt"] = _aware(body.expires_at)  # tolerate capitalization slip, then remove
         updates["expiresAt"] = _aware(body.expires_at)
+        updates.pop("ExpiresAt", None)
     if body.capacity is not None:
         updates["capacity"] = body.capacity
     if body.neighborhoods is not None:
         updates["neighborhoods"] = list(body.neighborhoods)
-    # NEW: category update
     if body.category is not None:
         updates["category"] = body.category
 
@@ -286,18 +414,29 @@ def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     ev_snap = ev_ref.get()
     if not ev_snap or not ev_snap.exists:
         raise HTTPException(status_code=404, detail="Event not found")
+    ev = ev_snap.to_dict() or {}
 
     uid = claims["uid"]
-    rid = f"{event_id}_{uid}"
     now = _now()
 
+    # Capacity applies to "going" only
+    cap = ev.get("capacity")
+    stats = _attendee_stats(event_id, uid)
+    already_status = stats["userStatus"]
+
+    if body.status == "going" and isinstance(cap, int) and cap >= 1:
+        is_already_going = (already_status == "going")
+        if not is_already_going and stats["countGoing"] >= cap:
+            raise HTTPException(status_code=409, detail="Event is at capacity")
+
+    # Upsert RSVP row
+    rid = f"{event_id}_{uid}"
     payload = {
         "eventId": event_id,
         "uid": uid,
         "status": body.status,
         "rsvpAt": now,
     }
-
     ref = db.collection("event_attendees").document(rid)
     ref.set(payload, merge=True)
 
@@ -306,9 +445,29 @@ def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     data["id"] = doc.id
     return _jsonify(data)
 
+@router.delete("/events/{event_id}/rsvp", summary="Leave an event (remove RSVP)")
+def leave_event(event_id: str, claims=Depends(verify_token)):
+    # ensure event exists
+    ev_ref = db.collection("events").document(event_id)
+    ev_snap = ev_ref.get()
+    if not ev_snap or not ev_snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    uid = claims["uid"]
+    rid = f"{event_id}_{uid}"
+    coll = db.collection("event_attendees")
+    ref = coll.document(rid)
+
+    # Delete record if present
+    if hasattr(ref, "delete"):
+        ref.delete()
+    elif hasattr(coll, "_docs"):
+        coll._docs.pop(rid, None)
+
+    return {"ok": True}
+
 @router.delete("/events/{event_id}", summary="Delete an event (host or admin)")
 def delete_event(event_id: str, claims = Depends(verify_token)):
-    # Use coll + ref so we can fall back to the fake's _docs map
     coll = db.collection("events")
     ref = coll.document(event_id)
 
@@ -323,15 +482,13 @@ def delete_event(event_id: str, claims = Depends(verify_token)):
     if not (is_owner or is_admin):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    # --- Delete the event (real Firestore OR dev fake) ---
+    # Delete the event
     if hasattr(ref, "delete"):
-        # real Firestore path
         ref.delete()
     elif hasattr(coll, "_docs"):
-        # dev fake path
         coll._docs.pop(event_id, None)
 
-    # --- (Optional) Cascade delete RSVPs for this event ---
+    # Cascade delete RSVPs for this event
     rsvp_coll = db.collection("event_attendees")
     for rid, rec in _list_docs(rsvp_coll):
         if (rec or {}).get("eventId") == event_id:
@@ -342,40 +499,3 @@ def delete_event(event_id: str, claims = Depends(verify_token)):
                 rsvp_coll._docs.pop(rid, None)
 
     return {"ok": True, "id": event_id}
-
-@router.patch("/events/{event_id}")
-def patch_event(
-    event_id: str,
-    payload: Dict[str, Any],
-    claims: dict = Depends(verify_token),
-):
-    ref = db.collection("events").document(event_id)
-    doc = ref.get()
-    if not doc.exists:
-        raise HTTPException(status_code=404, detail="Event not found")
-
-    event = doc.to_dict()
-
-    # Permission check
-    uid = claims.get("uid")
-    is_admin = claims.get("admin", False)
-    if not (uid == event.get("hostUid") or is_admin):
-        raise HTTPException(status_code=403, detail="Not allowed to edit")
-
-    # Only allow safe fields to be updated
-    editable_fields = {
-        "title", "details", "startAt", "endAt",
-        "category", "capacity", "neighborhoods"
-    }
-    updates = {k: v for k, v in payload.items() if k in editable_fields}
-
-    if not updates:
-        raise HTTPException(status_code=400, detail="No editable fields provided")
-
-    updates["updatedAt"] = datetime.now(timezone.utc).isoformat()
-    ref.update(updates)
-
-    # Return merged record
-    event.update(updates)
-    return {"ok": True, "event": event}
-
