@@ -33,6 +33,7 @@ Authorization: Bearer <idToken>
 **CI/dev toggles (already used in CI):**
 - `ALLOW_DEV_AUTH=1` → allow the `X-*` headers above  
 - `SKIP_FIREBASE_INIT=1` *(or `SKIP_FIREBASE=1`)* → skip Admin SDK init  
+- `CI=true` → enables the in-memory Firestore fake for tests  
 - When dev mode is enabled, a default UID/email is used if headers are missing.
 
 ---
@@ -46,7 +47,7 @@ See **[schema.md](./schema.md)** for the Firestore layout (Users, Events, RSVPs,
 ## 🧭 Users API Overview
 
 The **Users API** manages profile documents in Firestore for authenticated GatherGrove users.  
-All routes are secured with Firebase Authentication and only operate on the caller’s own document.
+All routes are secured with Firebase Authentication and only operate on the caller’s own document (unless admin).
 
 ### 🔐 Authentication
 
@@ -82,6 +83,7 @@ curl -sS -X POST http://127.0.0.1:8000/users \
 **Example response**
 ~~~json
 {
+  "id": "abc123UID",
   "uid": "abc123UID",
   "email": "brian.carlberg@gmail.com",
   "name": "Brian Carlberg",
@@ -107,9 +109,9 @@ curl -sS -X GET http://127.0.0.1:8000/users/me \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ~~~
 
-### **4️⃣ GET `/users/{user_id}`** — Fetch a specific user (owner-only)
+### **4️⃣ GET `/users/{user_id}`** — Fetch a specific user (owner or admin)
 
-- **403** if `{user_id}` ≠ caller’s UID  
+- **403** if `{user_id}` ≠ caller’s UID and caller is not admin  
 - **404** if document doesn’t exist
 
 ~~~bash
@@ -117,7 +119,31 @@ curl -sS -X GET http://127.0.0.1:8000/users/abc123UID \
   -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
 ~~~
 
-### **5️⃣ GET `/users/me/favorites`** — List saved favorite households
+### **5️⃣ PATCH `/users/{uid}`** — Admin/owner partial update by UID
+
+~~~bash
+curl -sS -X PATCH http://127.0.0.1:8000/users/abc123UID \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"isAdmin": true}' | python3 -m json.tool
+~~~
+
+### **6️⃣ GET `/users`** — **Admin:** list users (paginated)
+
+Query params: `pageSize` (1–200, default 50), `pageToken` (last-seen id)
+
+~~~bash
+curl -sS "http://127.0.0.1:8000/users?pageSize=50" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" | python3 -m json.tool
+~~~
+
+---
+
+## ⭐ Favorites (User-based)
+
+Favorites live on the **user document** (`users/{uid}.favorites`) and are exposed under `/users/me/favorites`.
+
+### **GET `/users/me/favorites`** — List saved favorite households
 
 Returns small “household card” objects for IDs in `users.favorites`.
 
@@ -135,12 +161,26 @@ curl -sS -X GET http://127.0.0.1:8000/users/me/favorites \
       "id": "H123",
       "lastName": "Faverson",
       "type": "family",
-      "neighborhood": "Bay Hill",
+      "neighborhood": "BAYHILL",
       "childAges": [6, 10]
     }
   ],
   "nextPageToken": null
 }
+~~~
+
+### **POST `/users/me/favorites/{household_id}`** — Add to favorites (idempotent)
+
+~~~bash
+curl -sS -X POST http://127.0.0.1:8000/users/me/favorites/H123 \
+  -H "X-Uid: brian" -H "X-Email: brian@example.com" | python3 -m json.tool
+~~~
+
+### **DELETE `/users/me/favorites/{household_id}`** — Remove from favorites (idempotent)
+
+~~~bash
+curl -sS -X DELETE http://127.0.0.1:8000/users/me/favorites/H123 \
+  -H "X-Uid: brian" -H "X-Email: brian@example.com" | python3 -m json.tool
 ~~~
 
 ---
@@ -164,13 +204,13 @@ curl -sS -X POST http://127.0.0.1:8000/events \
     "title":"Neighborhood hot cocoa night",
     "details":"Bring your favorite mug!",
     "startAt":"2025-12-15T23:00:00Z",
-    "neighborhoods":["Bay Hill","Eagles Point"]
+    "neighborhoods":["BAYHILL","EAGLES_POINT"]
   }' | python3 -m json.tool
 ~~~
 
 ### 2) **GET `/events`** — List upcoming & happening-now
 
-Query params: `neighborhood=Bay Hill` (optional), `type=now|future` (optional)
+Query params: `neighborhood=BAYHILL` (optional), `type=now|future` (optional)
 
 **List response shape (consistent across list endpoints):**
 ~~~json
@@ -178,7 +218,7 @@ Query params: `neighborhood=Bay Hill` (optional), `type=now|future` (optional)
 ~~~
 
 ~~~bash
-curl -sS "http://127.0.0.1:8000/events?type=future&neighborhood=Bay%20Hill" \
+curl -sS "http://127.0.0.1:8000/events?type=future&neighborhood=BAYHILL" \
   -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
   | python3 -m json.tool
 ~~~
@@ -191,18 +231,7 @@ curl -sS http://127.0.0.1:8000/events/<EVENT_ID> \
   | python3 -m json.tool
 ~~~
 
-### 4) **POST `/events/{event_id}/rsvp`** — RSVP (going/maybe/declined)
-
-Body: `{ "status": "going" | "maybe" | "declined" }`
-
-~~~bash
-curl -sS -X POST http://127.0.0.1:8000/events/<EVENT_ID>/rsvp \
-  -H "Content-Type: application/json" \
-  -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
-  -d '{"status":"going"}' | python3 -m json.tool
-~~~
-
-### 5) **PATCH `/events/{event_id}`** — Edit (host-only)
+### 4) **PATCH `/events/{event_id}`** — Edit (host/admin only)
 
 ~~~bash
 curl -sS -X PATCH http://127.0.0.1:8000/events/<EVENT_ID> \
@@ -211,7 +240,7 @@ curl -sS -X PATCH http://127.0.0.1:8000/events/<EVENT_ID> \
   -d '{"title":"Neighborhood hot cocoa night (updated)"}' | python3 -m json.tool
 ~~~
 
-### 6) **DELETE `/events/{event_id}`** — Delete (host or admin)
+### 5) **DELETE `/events/{event_id}`** — Delete (host or admin)
 
 ~~~bash
 curl -sS -X DELETE http://127.0.0.1:8000/events/<EVENT_ID> \
@@ -233,7 +262,7 @@ Query params:
 - `pageSize` (1–50, default 20), `pageToken` (opaque cursor)
 
 ~~~bash
-curl -sS "http://127.0.0.1:8000/households?neighborhood=Bay%20Hill&type=family" \
+curl -sS "http://127.0.0.1:8000/households?neighborhood=BAYHILL&type=family" \
   -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
   | python3 -m json.tool
 ~~~
@@ -256,34 +285,27 @@ Query params:
 ~~~json
 {
   "items": [
-    { "id": "H123", "type": "family", "neighborhood": "Bay Hill", "childAges": [6, 10] }
+    { "id": "H123", "type": "family", "neighborhood": "BAYHILL", "childAges": [6, 10] }
   ],
   "nextPageToken": "H123"
 }
 ~~~
 
 ~~~bash
-curl -sS "http://127.0.0.1:8000/people?neighborhood=Bay%20Hill&type=family" \
+curl -sS "http://127.0.0.1:8000/people?neighborhood=BAYHILL&type=family" \
   -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" \
   | python3 -m json.tool
 ~~~
 
-### ⭐ Favorites (on the user document)
+---
 
-**POST `/people/{household_id}/favorite`** — add a household to the caller’s favorites  
-**DELETE `/people/{household_id}/favorite`** — remove it
+## 🧰 Dev Utilities
 
+**Seed a dev household (local only)**  
 ~~~bash
-# Favorite
-curl -sS -X POST http://127.0.0.1:8000/people/favH/favorite \
-  -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" | python3 -m json.tool
-
-# Unfavorite
-curl -sS -X DELETE http://127.0.0.1:8000/people/favH/favorite \
-  -H "X-Uid: brian" -H "X-Email: brian@example.com" -H "X-Admin: false" | python3 -m json.tool
+curl -s -X POST http://127.0.0.1:8000/_dev/seed/household/H123 \
+  -H "X-Uid: brian" -H "X-Email: brian@example.com"
 ~~~
-
-To fetch the full cards for your saved favorites, see **`GET /users/me/favorites`** in the Users section above.
 
 ---
 
@@ -346,7 +368,7 @@ _Current status: tests passing locally and in CI (Python 3.12 & 3.13)._
 
 - [ ] People paging tests (pageSize/pageToken round-trip)  
 - [ ] Event attendee list `GET /events/{id}/attendees`  
-- [ ] Admin list users endpoint (e.g., `/users/all`)  
+- [ ] Admin list users load-test + export  
 - [ ] More auth edge-case tests
 
 ---
@@ -356,4 +378,3 @@ _Current status: tests passing locally and in CI (Python 3.12 & 3.13)._
 - Firebase Auth + Firestore  
 - Python 3.13  
 - Uvicorn (local dev server)
- # or small edit
