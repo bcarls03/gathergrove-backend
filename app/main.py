@@ -11,14 +11,20 @@ from app.core.firebase import db  # real Firestore OR dev fake when SKIP_* is se
 app = FastAPI(title="GatherGrove Backend", version="0.1.0")
 
 # ----- CORS -----
+FRONTEND_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+# Optional extra origins via env (comma-separated)
+extra = os.getenv("CORS_EXTRA_ORIGINS", "")
+if extra:
+    FRONTEND_ORIGINS.extend([o.strip() for o in extra.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=FRONTEND_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -110,3 +116,17 @@ app.include_router(households.router)
 
 from app.routes import people
 app.include_router(people.router)
+
+# --- Profile router (supports either location) ---
+# Preferred: place your file at app/routes/profile.py and import below.
+# If you kept a flat file app_routes_profile.py, we'll try that too.
+try:
+    from app.routes import profile as profile_module  # app/routes/profile.py
+    app.include_router(profile_module.router)
+except Exception:
+    try:
+        import app_routes_profile as profile_module  # app_routes_profile.py at repo root
+        app.include_router(profile_module.router)
+    except Exception:
+        # If neither exists, you still have a working app; /profile just won't be mounted.
+        pass
