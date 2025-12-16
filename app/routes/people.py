@@ -26,10 +26,12 @@ def _list_docs(coll):
         return list(coll._docs.items())
     return []
 
+
 def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize field names so responses have stable keys expected by clients.
-    Ensures: 'type', 'neighborhood', and builds 'childAges' from children.
+    Ensures: 'type', 'neighborhood', builds 'childAges' from children, and
+    always exposes 'adultNames' as a list of strings.
     """
     out = dict(d)
 
@@ -54,10 +56,25 @@ def _normalize_household(d: Dict[str, Any]) -> Dict[str, Any]:
             child_ages.append(kid)
     out["childAges"] = child_ages
 
+    # adults: normalize to a list of strings
+    raw_adults = d.get("adultNames")
+    adult_names: List[str] = []
+    if isinstance(raw_adults, list):
+        adult_names = [str(a) for a in raw_adults if a is not None]
+    elif isinstance(raw_adults, str):
+        adult_names = [raw_adults]
+    elif raw_adults is None:
+        adult_names = []
+    else:
+        adult_names = [str(raw_adults)]
+    out["adultNames"] = adult_names
+
     return out
+
 
 def _child_ages(doc: Dict[str, Any]) -> List[int]:
     return list(doc.get("childAges") or [])
+
 
 def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optional[int]) -> bool:
     """Return True if any child age falls within [min_age, max_age]."""
@@ -69,6 +86,7 @@ def _age_match_any(child_ages: List[int], min_age: Optional[int], max_age: Optio
         if lo <= age <= hi:
             return True
     return False
+
 
 def _stable_sort(items: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dict[str, Any]]]:
     """Deterministic order: lastName (casefold) then id."""
@@ -83,6 +101,7 @@ def _stable_sort(items: List[Tuple[str, Dict[str, Any]]]) -> List[Tuple[str, Dic
 def _b64url_encode(d: Dict[str, Any]) -> str:
     raw = json.dumps(d, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
 
 def _b64url_decode(token: str) -> Dict[str, Any]:
     try:
@@ -126,7 +145,6 @@ def list_people(
 
     # 2) fetch, normalize, and stable-sort
     docs = _list_docs(db.collection("households"))  # list[(id, dict)]
-    # normalize now so filters can use normalized fields
     normed: List[Tuple[str, Dict[str, Any]]] = []
     for hid, data in docs:
         if not data:
@@ -163,12 +181,15 @@ def list_people(
                 break
 
     page = filtered[start_idx : start_idx + pageSize]
+
     items = [
         {
             "id": d["id"],
+            "lastName": d.get("lastName") or d.get("householdLastName"),
             "type": d.get("type"),
             "neighborhood": d.get("neighborhood"),
             "childAges": list(d.get("childAges") or []),
+            "adultNames": list(d.get("adultNames") or []),
         }
         for (_hid, d) in page
     ]
@@ -187,6 +208,7 @@ def _utcnow():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc)
 
+
 def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
     uref = db.collection("users").document(uid)
     snap = uref.get()
@@ -202,8 +224,9 @@ def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
         return shell
     return snap.to_dict() or {"uid": uid, "email": email, "favorites": []}
 
+
 @router.post("/people/{household_id}/favorite", summary="Favorite a household (adds to user.favorites)")
-def favorite_household(household_id: str, claims = Depends(verify_token)):
+def favorite_household(household_id: str, claims=Depends(verify_token)):
     uid = claims["uid"]
     uref = db.collection("users").document(uid)
     data = _ensure_user_doc(uid, claims.get("email"))
@@ -213,8 +236,9 @@ def favorite_household(household_id: str, claims = Depends(verify_token)):
     uref.set({"favorites": favs, "updatedAt": _utcnow()}, merge=True)
     return {"ok": True, "favorites": favs}
 
+
 @router.delete("/people/{household_id}/favorite", summary="Unfavorite a household (removes from user.favorites)")
-def unfavorite_household(household_id: str, claims = Depends(verify_token)):
+def unfavorite_household(household_id: str, claims=Depends(verify_token)):
     uid = claims["uid"]
     uref = db.collection("users").document(uid)
     data = _ensure_user_doc(uid, claims.get("email"))

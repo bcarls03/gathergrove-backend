@@ -18,14 +18,20 @@ def _aware(dt: datetime) -> datetime:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
 
+
 def _jsonify(x):
-    if isinstance(x, datetime): return _aware(x).isoformat()
-    if isinstance(x, list):     return [_jsonify(v) for v in x]
-    if isinstance(x, dict):     return {k: _jsonify(v) for k, v in x.items()}
+    if isinstance(x, datetime):
+        return _aware(x).isoformat()
+    if isinstance(x, list):
+        return [_jsonify(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _jsonify(v) for k, v in x.items()}
     return x
+
 
 def _can_edit(target_uid: str, claims: dict) -> bool:
     return claims.get("uid") == target_uid or bool(claims.get("admin"))
+
 
 def _child_ages(raw_children) -> List[int]:
     ages: List[int] = []
@@ -35,6 +41,7 @@ def _child_ages(raw_children) -> List[int]:
         elif isinstance(kid, int):
             ages.append(kid)
     return ages
+
 
 def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
     """
@@ -57,6 +64,7 @@ def _ensure_user_doc(uid: str, email: Optional[str]) -> Dict[str, Any]:
         return payload
     return snap.to_dict() or {}
 
+
 def _safe_user_shape(doc_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize outgoing user shape for clients/tests.
@@ -72,7 +80,10 @@ def _safe_user_shape(doc_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
     }
     return out
 
-def _paginate_ids(ids: List[str], page_size: int, page_token: Optional[str]) -> Tuple[List[str], Optional[str]]:
+
+def _paginate_ids(
+    ids: List[str], page_size: int, page_token: Optional[str]
+) -> Tuple[List[str], Optional[str]]:
     """
     Very simple pagination that sorts ids and slices by page_token (which is last seen id).
     """
@@ -88,10 +99,24 @@ def _paginate_ids(ids: List[str], page_size: int, page_token: Optional[str]) -> 
     next_token = page[-1] if end < len(ids_sorted) and page else None
     return page, next_token
 
+
+def _list_docs_any(coll) -> List[Tuple[str, Dict[str, Any]]]:
+    """
+    Works with real Firestore (stream) and our in-memory fake (._docs).
+    Returns list[(id, dict)].
+    """
+    if hasattr(coll, "stream"):
+        return [(doc.id, doc.to_dict() or {}) for doc in coll.stream()]
+    if hasattr(coll, "_docs"):  # dev fake path
+        return list(coll._docs.items())
+    return []
+
+
 # ----------------------------- Models ---------------------------------
 class UserIn(BaseModel):
     name: constr(strip_whitespace=True, min_length=1)
     isAdmin: bool = False  # ignored unless caller has admin claim
+
 
 class UserPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -109,10 +134,14 @@ class UserPatch(BaseModel):
 
     def to_update_dict(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {}
-        if self.name is not None:     out["name"] = self.name.strip()
-        if self.email is not None:    out["email"] = str(self.email)
-        if self.isAdmin is not None:  out["isAdmin"] = bool(self.isAdmin)
+        if self.name is not None:
+            out["name"] = self.name.strip()
+        if self.email is not None:
+            out["email"] = str(self.email)
+        if self.isAdmin is not None:
+            out["isAdmin"] = bool(self.isAdmin)
         return out
+
 
 # ------------------------------ Routes --------------------------------
 
@@ -146,6 +175,7 @@ def upsert_my_user(body: UserIn, claims=Depends(verify_token)):
     data = doc.to_dict() or {}
     return _jsonify(_safe_user_shape(doc.id, data))
 
+
 @router.patch("/users/me", summary="Partially update my user (owner-only)")
 def patch_my_user(body: UserPatch, claims=Depends(verify_token)):
     uid = claims["uid"]
@@ -156,7 +186,9 @@ def patch_my_user(body: UserPatch, claims=Depends(verify_token)):
 
     updates = body.to_update_dict()
     if not updates:
-        raise HTTPException(status_code=400, detail="Provide at least one field to update")
+        raise HTTPException(
+            status_code=400, detail="Provide at least one field to update"
+        )
     if "isAdmin" in updates and not claims.get("admin", False):
         updates.pop("isAdmin")
 
@@ -165,6 +197,7 @@ def patch_my_user(body: UserPatch, claims=Depends(verify_token)):
 
     data = ref.get().to_dict() or {}
     return _jsonify(_safe_user_shape(uid, data))
+
 
 @router.get("/users/me", summary="Get my user (owner-only)")
 def get_my_user(claims=Depends(verify_token)):
@@ -175,6 +208,7 @@ def get_my_user(claims=Depends(verify_token)):
     data = snap.to_dict() or {}
     return _jsonify(_safe_user_shape(snap.id, data))
 
+
 @router.get("/users/{user_id}", summary="Get user by ID (owner or admin)")
 def get_user_by_id(user_id: str, claims=Depends(verify_token)):
     if claims["uid"] != user_id and not claims.get("admin", False):
@@ -184,6 +218,7 @@ def get_user_by_id(user_id: str, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="User not found")
     data = snap.to_dict() or {}
     return _jsonify(_safe_user_shape(snap.id, data))
+
 
 @router.patch("/users/{uid}", summary="PATCH by UID (owner or admin)")
 def patch_user_by_id(
@@ -198,7 +233,9 @@ def patch_user_by_id(
 
     updates = payload.to_update_dict()
     if not updates:
-        raise HTTPException(status_code=400, detail="Provide at least one field to update")
+        raise HTTPException(
+            status_code=400, detail="Provide at least one field to update"
+        )
     if "isAdmin" in updates and not claims.get("admin", False):
         updates.pop("isAdmin")
 
@@ -212,6 +249,7 @@ def patch_user_by_id(
 
     data = ref.get().to_dict() or {}
     return _jsonify(_safe_user_shape(uid, data))
+
 
 # ------------------------- Favorites (MVP) ------------------------------
 
@@ -231,20 +269,23 @@ def list_my_favorites(claims=Depends(verify_token)):
         if not hsnap or not hsnap.exists:
             continue
         h = hsnap.to_dict() or {}
-        items.append({
-            "id": hsnap.id,
-            "lastName": h.get("lastName"),
-            "type": h.get("type") or h.get("householdType") or h.get("kind"),
-            "neighborhood": h.get("neighborhood") or h.get("neighborhoodCode"),
-            "childAges": _child_ages(h.get("children")),
-        })
+        items.append(
+            {
+                "id": hsnap.id,
+                "lastName": h.get("lastName"),
+                "type": h.get("type") or h.get("householdType") or h.get("kind"),
+                "neighborhood": h.get("neighborhood") or h.get("neighborhoodCode"),
+                "childAges": _child_ages(h.get("children")),
+            }
+        )
 
     items.sort(key=lambda x: ((x.get("lastName") or "").lower(), x.get("id")))
     return {"items": _jsonify(items), "nextPageToken": None}
 
+
 @router.post(
     "/users/me/favorites/{household_id}",
-    summary="Add a household to my favorites (idempotent)"
+    summary="Add a household to my favorites (idempotent)",
 )
 def add_favorite(household_id: str, claims=Depends(verify_token)):
     uid = claims["uid"]
@@ -262,16 +303,20 @@ def add_favorite(household_id: str, claims=Depends(verify_token)):
     favs = set(udata.get("favorites") or [])
     if household_id not in favs:
         favs.add(household_id)
-        uref.set({
-            "favorites": list(sorted(favs)),
-            "updatedAt": _aware(datetime.now(timezone.utc))
-        }, merge=True)
+        uref.set(
+            {
+                "favorites": list(sorted(favs)),
+                "updatedAt": _aware(datetime.now(timezone.utc)),
+            },
+            merge=True,
+        )
 
     return {"ok": True}
 
+
 @router.delete(
     "/users/me/favorites/{household_id}",
-    summary="Remove a household from my favorites (idempotent)"
+    summary="Remove a household from my favorites (idempotent)",
 )
 def remove_favorite(household_id: str, claims=Depends(verify_token)):
     uid = claims["uid"]
@@ -285,20 +330,30 @@ def remove_favorite(household_id: str, claims=Depends(verify_token)):
     favs = set(udata.get("favorites") or [])
     if household_id in favs:
         favs.remove(household_id)
-        uref.set({
-            "favorites": list(sorted(favs)),
-            "updatedAt": _aware(datetime.now(timezone.utc))
-        }, merge=True)
+        uref.set(
+            {
+                "favorites": list(sorted(favs)),
+                "updatedAt": _aware(datetime.now(timezone.utc)),
+            },
+            merge=True,
+        )
 
     return {"ok": True}
 
+
 # ---------------------------- Admin List -------------------------------
 
-@router.get("/users", summary="Admin: list users", description="Admin-only, simple pagination.")
+@router.get(
+    "/users",
+    summary="Admin: list users",
+    description="Admin-only, simple pagination.",
+)
 def admin_list_users(
     claims=Depends(verify_token),
     page_size: int = Query(default=50, ge=1, le=200),
-    page_token: Optional[str] = Query(default=None, description="Return results after this last seen user id"),
+    page_token: Optional[str] = Query(
+        default=None, description="Return results after this last seen user id"
+    ),
 ):
     if not claims.get("admin", False):
         raise HTTPException(status_code=403, detail="Forbidden")
@@ -324,9 +379,37 @@ def admin_list_users(
 
     return _jsonify({"items": items, "nextPageToken": next_token})
 
+
+# --------------- Dev: list ALL households for People tab ---------------
+
+@router.get(
+    "/users/all",
+    summary="Dev: list ALL user/household docs (no filtering)",
+)
+def list_all_households_dev(
+    claims=Depends(verify_token),
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Return every user/household document so the People tab can see all
+    neighbors during local dev (Chrome + Safari).
+    """
+    coll = db.collection("users")
+    items: List[Dict[str, Any]] = []
+
+    for doc_id, data in _list_docs_any(coll):
+        if not data:
+            continue
+        rec = dict(data)
+        rec.setdefault("id", doc_id)
+        items.append(rec)
+
+    return {"items": _jsonify(items)}
+
+
 # --------------------------- DEV Utilities ----------------------------
 
 import os
+
 
 @router.post("/_dev/seed/household/{hid}", summary="[DEV] create a dummy household")
 def dev_seed_household(hid: str, claims=Depends(verify_token)):
@@ -335,12 +418,15 @@ def dev_seed_household(hid: str, claims=Depends(verify_token)):
         raise HTTPException(status_code=403, detail="Dev seeding disabled")
 
     now = _aware(datetime.now(timezone.utc))
-    db.collection("households").document(hid).set({
-        "lastName": "Testers",
-        "type": "family",
-        "neighborhood": "BAYHILL",
-        "children": [{"age": 10}, {"age": 7}],
-        "createdAt": now,
-        "updatedAt": now,
-    }, merge=True)
+    db.collection("households").document(hid).set(
+        {
+            "lastName": "Testers",
+            "type": "family",
+            "neighborhood": "BAYHILL",
+            "children": [{"age": 10}, {"age": 7}],
+            "createdAt": now,
+            "updatedAt": now,
+        },
+        merge=True,
+    )
     return {"ok": True, "id": hid}

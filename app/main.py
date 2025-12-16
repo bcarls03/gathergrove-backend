@@ -1,23 +1,22 @@
 # app/main.py
 import os
-from typing import Optional
-
-from fastapi import FastAPI, Depends, Header, HTTPException, status
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from app.core.firebase import db  # real Firestore OR dev fake when SKIP_* is set
+from app.deps.auth import verify_token  # auth lives here
 
 app = FastAPI(title="GatherGrove Backend", version="0.1.0")
 
-# ----- CORS -----
+# ---------------------------------------------------------------------------
+# CORS
+# ---------------------------------------------------------------------------
 FRONTEND_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
-# Optional extra origins via env (comma-separated)
 extra = os.getenv("CORS_EXTRA_ORIGINS", "")
 if extra:
     FRONTEND_ORIGINS.extend([o.strip() for o in extra.split(",") if o.strip()])
@@ -30,62 +29,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ----- Auth (dev + prod) -----
-security = HTTPBearer(auto_error=False)
-
-# Environment switches:
-# - ALLOW_DEV_AUTH=1        → accept X-Uid/X-Email/X-Admin headers (used in CI & local dev)
-# - SKIP_FIREBASE_INIT=1    → don't initialize Admin SDK, use dev headers
-# - SKIP_FIREBASE=1         → legacy toggle, treated same as above
-# - otherwise               → require Firebase ID token (Authorization: Bearer <idToken>)
-ALLOW_DEV = os.getenv("ALLOW_DEV_AUTH") == "1"
-SKIP_INIT = os.getenv("SKIP_FIREBASE_INIT") == "1" or os.getenv("SKIP_FIREBASE") == "1"
-IS_CI = os.getenv("CI") == "true"
-
-def verify_token(
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    # Dev-only headers (also exposed in Swagger)
-    x_uid:   Optional[str] = Header(None, alias="X-Uid",   description="Dev-only: user UID"),
-    x_email: Optional[str] = Header(None, alias="X-Email", description="Dev-only: user email"),
-    x_admin: Optional[str] = Header(None, alias="X-Admin", description='Dev-only: "true"/"false"'),
-):
-    """
-    DEV path (ALLOW_DEV_AUTH=1 or SKIP_FIREBASE_INIT=1 or CI=true):
-      - Accept X-Uid/X-Email/X-Admin if provided; otherwise default to a safe dev identity.
-    PROD path:
-      - Require Authorization: Bearer <idToken> and verify with firebase_admin.auth.
-    """
-    use_dev_path = ALLOW_DEV or SKIP_INIT or IS_CI
-    if use_dev_path:
-        uid = x_uid or os.getenv("DEV_UID") or "dev-uid"
-        email = x_email or os.getenv("DEV_EMAIL") or f"{uid}@example.com"
-        admin = str(x_admin or os.getenv("DEV_ADMIN") or "false").lower() in ("1", "true", "yes", "y", "on")
-        return {"uid": uid, "email": email, "admin": admin}
-
-    # ---- Production path (real Firebase ID token) ----
-    if not creds:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization: Bearer <token>",
-        )
-
-    token = creds.credentials
-    try:
-        from firebase_admin import auth
-        decoded = auth.verify_id_token(token)
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-
-    return {
-        "uid": decoded["uid"],
-        "email": decoded.get("email"),
-        "admin": bool(decoded.get("admin")),
-    }
-
-# ----- Meta routes -----
+# ---------------------------------------------------------------------------
+# Meta routes
+# ---------------------------------------------------------------------------
 @app.get("/health", tags=["meta"])
 def health():
     return {"status": "ok"}
@@ -96,7 +42,6 @@ def root():
 
 @app.get("/firebase", tags=["meta"], summary="Firebase Ping")
 def firebase_ping():
-    # Works with dev fake and real Firestore
     list(db.collections())
     return {"ok": True}
 
@@ -104,29 +49,24 @@ def firebase_ping():
 def whoami(claims=Depends(verify_token)):
     return claims
 
-# ----- Mount routers after verify_token is defined -----
-from app.routes import users
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+from app.routes import users, events, households, people, push
+
 app.include_router(users.router)
-
-from app.routes import events
 app.include_router(events.router)
-
-from app.routes import households
 app.include_router(households.router)
-
-from app.routes import people
 app.include_router(people.router)
+app.include_router(push.router, prefix="/api")
 
-# --- Profile router (supports either location) ---
-# Preferred: place your file at app/routes/profile.py and import below.
-# If you kept a flat file app_routes_profile.py, we'll try that too.
+# Optional profile router
 try:
-    from app.routes import profile as profile_module  # app/routes/profile.py
+    from app.routes import profile as profile_module
     app.include_router(profile_module.router)
 except Exception:
     try:
-        import app_routes_profile as profile_module  # app_routes_profile.py at repo root
+        import app_routes_profile as profile_module
         app.include_router(profile_module.router)
     except Exception:
-        # If neither exists, you still have a working app; /profile just won't be mounted.
         pass

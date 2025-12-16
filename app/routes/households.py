@@ -2,51 +2,138 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import List, Optional, Literal, Dict, Any
+from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from app.core.firebase import db
-from app.main import verify_token  # dev/prod auth
+
+# ✅ IMPORTANT: do NOT import from app.main (circular risk)
+from app.deps.auth import verify_token  # dev/prod auth
 
 router = APIRouter(tags=["households"])
 
-HouseholdType = Literal["family", "emptyNest", "singleCouple"]
+
+# ---------------- helpers ----------------
 
 def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _jsonify(x):
-    if isinstance(x, datetime): return _aware(x).isoformat()
-    if isinstance(x, list):     return [_jsonify(v) for v in x]
-    if isinstance(x, dict):     return {k: _jsonify(v) for k,v in x.items()}
+    if isinstance(x, datetime):
+        return _aware(x).isoformat()
+    if isinstance(x, list):
+        return [_jsonify(v) for v in x]
+    if isinstance(x, dict):
+        return {k: _jsonify(v) for k, v in x.items()}
     return x
 
+
 def _list_docs(coll):
-    if hasattr(coll, "stream"):     # real Firestore
+    if hasattr(coll, "stream"):  # real Firestore
         return [(d.id, d.to_dict() or {}) for d in coll.stream()]
-    if hasattr(coll, "_docs"):      # dev fake
+    if hasattr(coll, "_docs"):  # dev fake
         return list(coll._docs.items())
     return []
+
+
+# ---------------- routes ----------------
 
 @router.get("/households", summary="List households (filterable)")
 def list_households(
     neighborhood: Optional[str] = Query(None, description="Neighborhood name"),
-    type: Optional[HouseholdType] = Query(None, description='family | emptyNest | singleCouple'),
-    claims = Depends(verify_token),
+    household_type: Optional[str] = Query(
+        None,
+        description="Filter against either legacy 'type' OR newer 'householdType' (any string).",
+    ),
+    claims=Depends(verify_token),
 ):
+    """
+    Returns household docs stored in Firestore collection 'households'.
+
+    Notes:
+    - Older docs may use field 'type' (family/emptyNest/singleCouple).
+    - Newer docs / frontend typically use field 'householdType' (e.g., 'Family w/ Kids').
+    We support filtering against either.
+    """
     coll = db.collection("households")
     items: List[Dict[str, Any]] = []
+
     for hid, doc in _list_docs(coll):
-        if not doc: continue
-        if neighborhood and doc.get("neighborhood") != neighborhood:
+        if not doc:
             continue
-        if type and doc.get("type") != type:
+
+        doc_neighborhood = doc.get("neighborhood")
+        doc_type = doc.get("type")
+        doc_household_type = doc.get("householdType")
+
+        if neighborhood and doc_neighborhood != neighborhood:
             continue
-        row = dict(doc)
+
+        if household_type:
+            if (doc_type != household_type) and (doc_household_type != household_type):
+                continue
+
+        row: Dict[str, Any] = dict(doc)
         row["id"] = hid
+
+        # Ensure adultNames always present as a list
+        adult_names = row.get("adultNames")
+        if adult_names is None:
+            row["adultNames"] = []
+        elif not isinstance(adult_names, list):
+            row["adultNames"] = [str(adult_names)]
+        else:
+            row["adultNames"] = [str(n) for n in adult_names]
+
+        # Normalize Kids -> kids if someone posted wrong casing
+        if "Kids" in row and "kids" not in row:
+            row["kids"] = row.pop("Kids")
+
         items.append(row)
 
-    # stable-ish sort
-    def _key(d): return (str(d.get("lastName") or "").lower(), d["id"])
-    items.sort(key=_key)
+    items.sort(key=lambda d: (str(d.get("lastName") or "").lower(), str(d.get("id") or "")))
     return _jsonify(items)
+
+
+@router.post("/households", summary="Create/update my household (by uid)")
+def upsert_my_household(
+    payload: Dict[str, Any] = Body(...),
+    claims=Depends(verify_token),
+):
+    """
+    Create/update the household for the currently-auth'd user.
+    We key the household document by UID so Chrome + Safari become different households.
+
+    Frontend expects saving to work via POST /households.
+    """
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Missing uid in auth claims")
+
+    # Normalize Kids -> kids if payload came in wrong casing
+    if "Kids" in payload and "kids" not in payload:
+        payload["kids"] = payload.pop("Kids")
+
+    # Always stamp uid/email from auth
+    payload["uid"] = uid
+    payload["email"] = claims.get("email")
+
+    doc_ref = db.collection("households").document(uid)
+
+    # Preserve createdAt if doc already exists
+    existing = doc_ref.get().to_dict() or {}
+    created_at = existing.get("createdAt") or payload.get("createdAt") or _now_iso()
+
+    payload["createdAt"] = created_at
+    payload["updatedAt"] = _now_iso()
+
+    doc_ref.set(payload, merge=True)
+
+    saved = doc_ref.get().to_dict() or {}
+    saved["id"] = uid
+    return _jsonify(saved)
