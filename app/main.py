@@ -17,6 +17,7 @@ FRONTEND_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
+
 extra = os.getenv("CORS_EXTRA_ORIGINS", "")
 if extra:
     FRONTEND_ORIGINS.extend([o.strip() for o in extra.split(",") if o.strip()])
@@ -36,18 +37,22 @@ app.add_middleware(
 def health():
     return {"status": "ok"}
 
+
 @app.get("/", include_in_schema=False)
 def root():
     return {"message": "GatherGrove API running"}
+
 
 @app.get("/firebase", tags=["meta"], summary="Firebase Ping")
 def firebase_ping():
     list(db.collections())
     return {"ok": True}
 
+
 @app.get("/whoami", tags=["auth"], summary="Whoami")
 def whoami(claims=Depends(verify_token)):
     return claims
+
 
 # ---------------------------------------------------------------------------
 # Routers
@@ -58,15 +63,21 @@ app.include_router(users.router)
 app.include_router(events.router)
 app.include_router(households.router)
 app.include_router(people.router)
-app.include_router(push.router, prefix="/api")
+
+# ✅ IMPORTANT:
+# Your frontend posts to {VITE_API_BASE}/push/register
+# So we mount push at /push/* (no /api prefix).
+app.include_router(push.router)
 
 # Optional profile router
 try:
     from app.routes import profile as profile_module
+
     app.include_router(profile_module.router)
 except Exception:
     try:
-        import app_routes_profile as profile_module
+        import app_routes_profile as profile_module  # type: ignore
+
         app.include_router(profile_module.router)
     except Exception:
         pass

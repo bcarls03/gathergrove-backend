@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.core.firebase import db
-from app.main import verify_token
+from app.deps.auth import verify_token  # ✅ IMPORTANT: avoid importing from app.main
 
 router = APIRouter(prefix="/push", tags=["push"])
 
@@ -20,16 +20,6 @@ def _aware(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _jsonify(x):
-    if isinstance(x, datetime):
-        return _aware(x).isoformat()
-    if isinstance(x, list):
-        return [_jsonify(v) for v in x]
-    if isinstance(x, dict):
-        return {k: _jsonify(v) for k, v in x.items()}
-    return x
-
-
 # ---------- models ----------
 
 class PushRegisterIn(BaseModel):
@@ -39,9 +29,7 @@ class PushRegisterIn(BaseModel):
         description="Optional; we normally trust the authenticated user instead.",
     )
     token: str = Field(..., min_length=10, description="Device push token")
-    platform: Optional[str] = Field(
-        default=None, description="ios | android | web | unknown"
-    )
+    platform: Optional[str] = Field(default=None, description="ios | android | web | unknown")
 
 
 class PushRegisterOut(BaseModel):
@@ -49,6 +37,15 @@ class PushRegisterOut(BaseModel):
     uid: str
     tokens: List[str]
     updatedAt: datetime
+
+
+class PushTokensOut(BaseModel):
+    ok: bool
+    uid: str
+    tokens: List[str]
+    platforms: Dict[str, str]
+    createdAt: Optional[datetime] = None
+    updatedAt: Optional[datetime] = None
 
 
 # ---------- routes ----------
@@ -63,20 +60,17 @@ def register_push_token(
     claims: Dict[str, Any] = Depends(verify_token),
 ):
     """
-    Saves the device push token under a per-user document:
+    Stores tokens under:
+      collection("pushTokens").document(uid)
 
-      collection("pushTokens").document(uid) = {
-        uid,
-        tokens: [token1, token2, ...],
-        platforms: { token: platform },
-        createdAt,
-        updatedAt
-      }
-
-    Works with both real Firestore and the in-memory fake.
+    {
+      uid,
+      tokens: [token1, token2, ...],
+      platforms: { token: platform },
+      createdAt,
+      updatedAt
+    }
     """
-
-    # Auth wins; body.uid is just a fallback for dev tools if needed
     uid = claims.get("uid") or body.uid
     if not uid:
         raise HTTPException(
@@ -84,7 +78,7 @@ def register_push_token(
             detail="Missing uid for push registration",
         )
 
-    token = body.token.strip()
+    token = (body.token or "").strip()
     if not token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -98,13 +92,11 @@ def register_push_token(
     snap = ref.get()
     existing: Dict[str, Any] = snap.to_dict() or {}
 
-    # maintain a de-duplicated token list
     old_tokens: List[str] = list(existing.get("tokens") or [])
-    tokens_set = set(old_tokens)
+    tokens_set = set(t for t in old_tokens if isinstance(t, str) and t.strip())
     tokens_set.add(token)
     tokens = sorted(tokens_set)
 
-    # map token → platform (optional but handy later)
     platforms: Dict[str, str] = dict(existing.get("platforms") or {})
     platforms[token] = platform
 
@@ -119,9 +111,53 @@ def register_push_token(
 
     ref.set(payload, merge=True)
 
-    return PushRegisterOut(
+    return PushRegisterOut(ok=True, uid=uid, tokens=tokens, updatedAt=now)
+
+
+@router.get(
+    "/tokens",
+    response_model=PushTokensOut,
+    summary="Debug: return the current user's registered push tokens",
+)
+def get_my_push_tokens(
+    claims: Dict[str, Any] = Depends(verify_token),
+):
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing uid")
+
+    ref = db.collection("pushTokens").document(uid)
+    snap = ref.get()
+    data: Dict[str, Any] = snap.to_dict() or {}
+
+    return PushTokensOut(
         ok=True,
         uid=uid,
-        tokens=tokens,
-        updatedAt=now,
+        tokens=list(data.get("tokens") or []),
+        platforms=dict(data.get("platforms") or {}),
+        createdAt=data.get("createdAt"),
+        updatedAt=data.get("updatedAt"),
     )
+
+
+@router.delete(
+    "/tokens",
+    response_model=PushRegisterOut,
+    summary="Debug: clear the current user's registered push tokens",
+)
+def clear_my_push_tokens(
+    claims: Dict[str, Any] = Depends(verify_token),
+):
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing uid")
+
+    now = _aware(datetime.utcnow())
+    ref = db.collection("pushTokens").document(uid)
+
+    ref.set(
+        {"uid": uid, "tokens": [], "platforms": {}, "updatedAt": now, "createdAt": now},
+        merge=False,
+    )
+
+    return PushRegisterOut(ok=True, uid=uid, tokens=[], updatedAt=now)
