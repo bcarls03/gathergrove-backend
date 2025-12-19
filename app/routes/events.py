@@ -551,6 +551,22 @@ def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
     if body.category is not None:
         updates["category"] = body.category
 
+    # -----------------------------------------------------------------------
+    # ✅ VALIDATION FIX (for tests/test_events.py::test_patch_validations_and_success)
+    # If patching endAt (or startAt) results in endAt <= startAt, return 422.
+    # IMPORTANT: validate against the *merged* (current + updates) values.
+    # -----------------------------------------------------------------------
+    cur_start = _parse_dt(current.get("startAt"))
+    cur_end = _parse_dt(current.get("endAt"))
+
+    new_start = _parse_dt(updates.get("startAt")) or cur_start
+    new_end = _parse_dt(updates.get("endAt")) or cur_end
+
+    # Only enforce for future-ish events where start/end exist.
+    # (Your test patches endAt only, so this must still trigger.)
+    if new_start is not None and new_end is not None and new_end <= new_start:
+        raise HTTPException(status_code=422, detail="endAt must be strictly greater than startAt")
+
     if updates:
         updates["updatedAt"] = _now()
         ref.set(updates, merge=True)
