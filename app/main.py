@@ -1,10 +1,12 @@
 # app/main.py
 import os
-from fastapi import FastAPI, Depends
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.firebase import db  # real Firestore OR dev fake when SKIP_* is set
 from app.deps.auth import verify_token  # auth lives here
+from app.routes import events, households, people, push, users
 
 app = FastAPI(title="GatherGrove Backend", version="0.1.0")
 
@@ -22,6 +24,14 @@ extra = os.getenv("CORS_EXTRA_ORIGINS", "")
 if extra:
     FRONTEND_ORIGINS.extend([o.strip() for o in extra.split(",") if o.strip()])
 
+# Optional: allow a single extra origin via env var (useful for LAN testing)
+single = os.getenv("CORS_ORIGIN", "").strip()
+if single:
+    FRONTEND_ORIGINS.append(single)
+
+# De-dupe
+FRONTEND_ORIGINS = sorted({o for o in FRONTEND_ORIGINS if o})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
@@ -33,6 +43,8 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Meta routes
 # ---------------------------------------------------------------------------
+
+
 @app.get("/health", tags=["meta"])
 def health():
     return {"status": "ok"}
@@ -45,6 +57,7 @@ def root():
 
 @app.get("/firebase", tags=["meta"], summary="Firebase Ping")
 def firebase_ping():
+    # Touch firestore / dev fake so we can validate connection quickly
     list(db.collections())
     return {"ok": True}
 
@@ -57,7 +70,6 @@ def whoami(claims=Depends(verify_token)):
 # ---------------------------------------------------------------------------
 # Routers
 # ---------------------------------------------------------------------------
-from app.routes import users, events, households, people, push
 
 app.include_router(users.router)
 app.include_router(events.router)
@@ -65,8 +77,8 @@ app.include_router(households.router)
 app.include_router(people.router)
 
 # ✅ IMPORTANT:
-# Your frontend posts to {VITE_API_BASE}/push/register
-# So we mount push at /push/* (no /api prefix).
+# Frontend posts to {VITE_API_BASE_URL}/push/register
+# so we mount push at /push/* (no /api prefix).
 app.include_router(push.router)
 
 # Optional profile router
@@ -75,6 +87,7 @@ try:
 
     app.include_router(profile_module.router)
 except Exception:
+    # Legacy fallback (keep, but harmless if missing)
     try:
         import app_routes_profile as profile_module  # type: ignore
 

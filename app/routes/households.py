@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Dict, Any
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
-
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from app.core.firebase import db
-from app.deps.auth import verify_token  # dev/prod auth (avoid circular import)
+
+# ✅ IMPORTANT: do NOT import from app.main (circular risk)
+from app.deps.auth import verify_token  # dev/prod auth
 
 router = APIRouter(tags=["households"])
 
@@ -45,16 +46,9 @@ def _list_docs(coll):
 @router.get("/households", summary="List households (filterable)")
 def list_households(
     neighborhood: Optional[str] = Query(None, description="Neighborhood name"),
-    # ✅ TESTS call: /households?type=singleCouple
-    hh_type: Optional[str] = Query(
-        None,
-        alias="type",
-        description="Filter household by legacy 'type' (family/emptyNest/singleCouple).",
-    ),
-    # ✅ Keep backward-compat for any clients using household_type=
     household_type: Optional[str] = Query(
         None,
-        description="Backward-compatible alias for type; also matches newer 'householdType'.",
+        description="Filter against either legacy 'type' OR newer 'householdType' (any string).",
     ),
     claims=Depends(verify_token),
 ):
@@ -63,13 +57,11 @@ def list_households(
 
     Notes:
     - Older docs may use field 'type' (family/emptyNest/singleCouple).
-    - Newer docs / frontend may use field 'householdType' (e.g., 'Family w/ Kids' or similar).
-    Filtering supports both, but tests specifically require ?type=...
+    - Newer docs / frontend typically use field 'householdType' (e.g., 'Family w/ Kids').
+    We support filtering against either.
     """
     coll = db.collection("households")
     items: List[Dict[str, Any]] = []
-
-    wanted_type = hh_type or household_type
 
     for hid, doc in _list_docs(coll):
         if not doc:
@@ -82,8 +74,8 @@ def list_households(
         if neighborhood and doc_neighborhood != neighborhood:
             continue
 
-        if wanted_type:
-            if (doc_type != wanted_type) and (doc_household_type != wanted_type):
+        if household_type:
+            if (doc_type != household_type) and (doc_household_type != household_type):
                 continue
 
         row: Dict[str, Any] = dict(doc)
@@ -104,12 +96,7 @@ def list_households(
 
         items.append(row)
 
-    items.sort(
-        key=lambda d: (
-            str(d.get("lastName") or "").lower(),
-            str(d.get("id") or ""),
-        )
-    )
+    items.sort(key=lambda d: (str(d.get("lastName") or "").lower(), str(d.get("id") or "")))
     return _jsonify(items)
 
 
