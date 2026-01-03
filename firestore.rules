@@ -1,0 +1,256 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================================================
+    // HELPER FUNCTIONS
+    // ============================================================================
+    
+    // Check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user is admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('admin', false) == true;
+    }
+    
+    // Check if user owns this resource
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+    
+    // Get user's visibility setting
+    function getUserVisibility(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data.get('visibility', 'neighbors');
+    }
+    
+    // Get user's neighborhood
+    function getUserNeighborhood(uid) {
+      let userDoc = get(/databases/$(database)/documents/users/$(uid)).data;
+      return userDoc.get('neighborhood', '');
+    }
+    
+    // Check if two users are in the same neighborhood
+    function sameNeighborhood(uid1, uid2) {
+      let hood1 = getUserNeighborhood(uid1);
+      let hood2 = getUserNeighborhood(uid2);
+      return hood1 != '' && hood1 == hood2;
+    }
+    
+    // ============================================================================
+    // USERS COLLECTION (Individual-first architecture)
+    // ============================================================================
+    
+    match /users/{userId} {
+      // Anyone authenticated can create their own user profile
+      allow create: if isAuthenticated() && 
+                      request.auth.uid == userId;
+      
+      // Users can read their own profile
+      allow read: if isOwner(userId);
+      
+      // Users can update their own profile
+      allow update: if isOwner(userId);
+      
+      // Users can delete their own profile (or admin)
+      allow delete: if isOwner(userId) || isAdmin();
+      
+      // PUBLIC READ ACCESS based on visibility setting
+      // This enables discovery and neighbor connections
+      allow read: if isAuthenticated() && (
+        // Public profiles: anyone authenticated can see
+        resource.data.get('visibility', 'neighbors') == 'public' ||
+        
+        // Neighbors visibility: only same neighborhood
+        (resource.data.get('visibility', 'neighbors') == 'neighbors' && 
+         sameNeighborhood(request.auth.uid, userId)) ||
+        
+        // Private: only the user themselves (already covered above)
+        false
+      );
+    }
+    
+    // ============================================================================
+    // HOUSEHOLDS COLLECTION (Optional groupings for users)
+    // ============================================================================
+    
+    match /households/{householdId} {
+      // Any authenticated user can create a household
+      allow create: if isAuthenticated();
+      
+      // Household members can read their household
+      allow read: if isAuthenticated() && 
+                    request.auth.uid in resource.data.get('member_uids', []);
+      
+      // Household members can update their household
+      allow update: if isAuthenticated() && 
+                      request.auth.uid in resource.data.get('member_uids', []);
+      
+      // Household members can delete their household (or admin)
+      allow delete: if isAuthenticated() && (
+                      request.auth.uid in resource.data.get('member_uids', []) ||
+                      isAdmin()
+                    );
+      
+      // PUBLIC READ ACCESS for discovery (based on member visibility)
+      // If any household member has public/neighbor visibility, others can discover
+      allow read: if isAuthenticated() && (
+        // Check if any member has public visibility
+        exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        // Note: This is simplified - in production you'd check member visibility
+      );
+    }
+    
+    // ============================================================================
+    // EVENTS COLLECTION (Viral loop with visibility controls)
+    // ============================================================================
+    
+    match /events/{eventId} {
+      // Any authenticated user can create an event
+      allow create: if isAuthenticated();
+      
+      // Host can read their own event
+      allow read: if isAuthenticated() && (
+                    request.auth.uid == resource.data.get('host_user_id', '') ||
+                    request.auth.uid == resource.data.get('hostUid', '')  // Backward compat
+                  );
+      
+      // Host can update their own event
+      allow update: if isAuthenticated() && (
+                      request.auth.uid == resource.data.get('host_user_id', '') ||
+                      request.auth.uid == resource.data.get('hostUid', '') ||  // Backward compat
+                      isAdmin()
+                    );
+      
+      // Host can delete their own event (or admin)
+      allow delete: if isAuthenticated() && (
+                      request.auth.uid == resource.data.get('host_user_id', '') ||
+                      request.auth.uid == resource.data.get('hostUid', '') ||  // Backward compat
+                      isAdmin()
+                    );
+      
+      // PUBLIC READ ACCESS based on visibility (VIRAL LOOP)
+      allow read: if isAuthenticated() && (
+        // Public events: anyone authenticated can see (discovery + viral loop)
+        resource.data.get('visibility', 'public') == 'public' ||
+        
+        // Link-only events: anyone with the link can see
+        // Note: In practice, this is enforced at the API level with shareable_link
+        resource.data.get('visibility', 'public') == 'link_only' ||
+        
+        // Private events: host only (already covered above)
+        false
+      );
+      
+      // UNAUTHENTICATED READ ACCESS for public events (viral loop)
+      // This enables sharing event links with non-users
+      allow read: if resource.data.get('visibility', 'public') == 'public';
+    }
+    
+    // ============================================================================
+    // EVENT_ATTENDEES COLLECTION (RSVPs)
+    // ============================================================================
+    
+    match /event_attendees/{attendeeId} {
+      // Users can create their own RSVP
+      allow create: if isAuthenticated() && 
+                      request.auth.uid == request.resource.data.uid;
+      
+      // Users can read their own RSVP
+      allow read: if isAuthenticated() && 
+                    resource.data.uid == request.auth.uid;
+      
+      // Users can update their own RSVP
+      allow update: if isAuthenticated() && 
+                      resource.data.uid == request.auth.uid;
+      
+      // Users can delete their own RSVP
+      allow delete: if isAuthenticated() && 
+                      resource.data.uid == request.auth.uid;
+      
+      // Event host can read all RSVPs for their event
+      allow read: if isAuthenticated() && (
+        // Get the event and check if current user is the host
+        exists(/databases/$(database)/documents/events/$(resource.data.get('eventId', ''))) &&
+        (request.auth.uid == get(/databases/$(database)/documents/events/$(resource.data.get('eventId', ''))).data.get('host_user_id', '') ||
+         request.auth.uid == get(/databases/$(database)/documents/events/$(resource.data.get('eventId', ''))).data.get('hostUid', ''))  // Backward compat
+      );
+    }
+    
+    // ============================================================================
+    // NOTIFICATIONS COLLECTION
+    // ============================================================================
+    
+    match /notifications/{notificationId} {
+      // Users can read their own notifications
+      allow read: if isAuthenticated() && 
+                    resource.data.uid == request.auth.uid;
+      
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() && 
+                      resource.data.uid == request.auth.uid;
+      
+      // Users can delete their own notifications
+      allow delete: if isAuthenticated() && 
+                      resource.data.uid == request.auth.uid;
+      
+      // System (backend) can create notifications
+      // Note: In production, create would be done server-side with admin SDK
+      allow create: if isAuthenticated();
+    }
+    
+    // ============================================================================
+    // MESSAGES COLLECTION (Direct messages between users)
+    // ============================================================================
+    
+    match /messages/{messageId} {
+      // Users can read messages where they are sender or recipient
+      allow read: if isAuthenticated() && (
+                    request.auth.uid == resource.data.sender_uid ||
+                    request.auth.uid == resource.data.recipient_uid
+                  );
+      
+      // Users can create messages where they are the sender
+      allow create: if isAuthenticated() && 
+                      request.auth.uid == request.resource.data.sender_uid;
+      
+      // Users can update their own sent messages (edit within time window)
+      allow update: if isAuthenticated() && 
+                      request.auth.uid == resource.data.sender_uid;
+      
+      // Users can delete their own sent messages
+      allow delete: if isAuthenticated() && 
+                      request.auth.uid == resource.data.sender_uid;
+    }
+    
+    // ============================================================================
+    // FAVORITES COLLECTION (User favorites)
+    // ============================================================================
+    
+    match /favorites/{favoriteId} {
+      // Users can read their own favorites
+      allow read: if isAuthenticated() && 
+                    resource.data.uid == request.auth.uid;
+      
+      // Users can create their own favorites
+      allow create: if isAuthenticated() && 
+                      request.auth.uid == request.resource.data.uid;
+      
+      // Users can delete their own favorites
+      allow delete: if isAuthenticated() && 
+                      resource.data.uid == request.auth.uid;
+    }
+    
+    // ============================================================================
+    // DEFAULT DENY ALL
+    // ============================================================================
+    
+    // Deny all other access by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
