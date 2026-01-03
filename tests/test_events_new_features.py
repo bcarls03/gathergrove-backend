@@ -94,7 +94,8 @@ def test_create_event_with_public_visibility_generates_link(client, set_claims):
     assert data["visibility"] == "public"
     assert data["shareable_link"] is not None
     assert data["shareable_link"].startswith("/e/")
-    assert len(data["shareable_link"]) == 15  # /e/ + 12 char ID
+    # ✅ Full UUID (32 hex chars) for cryptographic security (128 bits entropy)
+    assert len(data["shareable_link"]) == 35  # /e/ (3 chars) + 32 char UUID hex
 
 
 def test_create_event_with_link_only_visibility(client, set_claims):

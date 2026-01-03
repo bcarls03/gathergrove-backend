@@ -383,7 +383,9 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
     visibility = body.visibility  # Will use default 'public' from model
     shareable_link = None
     if visibility in ('link_only', 'public'):
-        shareable_link = f"/e/{event_id[:12]}"  # Short link using first 12 chars
+        # Use full UUID for cryptographic security (128 bits entropy)
+        # Format: /e/{32-char-hex} - unguessable and collision-resistant
+        shareable_link = f"/e/{event_id}"
 
     payload: Dict[str, Any] = {
         "type": body.type,
@@ -546,8 +548,15 @@ def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     current = snap.to_dict() or {}
-    # ✅ Changed from hostUid to host_user_id (individual user)
-    host_uid = current.get("host_user_id") or current.get("hostUid")  # Backward compatibility
+    
+    # ✅ EXPLICIT HOST FIELD PRECEDENCE (prevents partial-migration edge cases)
+    # Priority: 1) host_user_id (new individual-first) → 2) hostUid (legacy) → 3) reject
+    host_uid = current.get("host_user_id")
+    if not host_uid:
+        host_uid = current.get("hostUid")  # Backward compatibility fallback
+    if not host_uid:
+        raise HTTPException(status_code=500, detail="Event missing host identifier")
+    
     if host_uid != claims["uid"] and not claims.get("admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -576,7 +585,7 @@ def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
         # Regenerate shareable_link if changing to link_only or public
         if body.visibility in ('link_only', 'public'):
             if not current.get("shareable_link"):
-                updates["shareable_link"] = f"/e/{event_id[:12]}"
+                updates["shareable_link"] = f"/e/{event_id}"
         elif body.visibility == 'private':
             updates["shareable_link"] = None
 
@@ -602,8 +611,15 @@ def cancel_event(event_id: str, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     current = snap.to_dict() or {}
-    # ✅ Changed from hostUid to host_user_id (individual user)
-    host_uid = current.get("host_user_id") or current.get("hostUid")  # Backward compatibility
+    
+    # ✅ EXPLICIT HOST FIELD PRECEDENCE (prevents partial-migration edge cases)
+    # Priority: 1) host_user_id (new individual-first) → 2) hostUid (legacy) → 3) reject
+    host_uid = current.get("host_user_id")
+    if not host_uid:
+        host_uid = current.get("hostUid")  # Backward compatibility fallback
+    if not host_uid:
+        raise HTTPException(status_code=500, detail="Event missing host identifier")
+    
     if host_uid != claims["uid"] and not claims.get("admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
@@ -861,8 +877,15 @@ def delete_event(event_id: str, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     data = snap.to_dict() or {}
-    # ✅ Changed from hostUid to host_user_id (individual user)
-    host_uid = data.get("host_user_id") or data.get("hostUid")  # Backward compatibility
+    
+    # ✅ EXPLICIT HOST FIELD PRECEDENCE (prevents partial-migration edge cases)
+    # Priority: 1) host_user_id (new individual-first) → 2) hostUid (legacy) → 3) reject
+    host_uid = data.get("host_user_id")
+    if not host_uid:
+        host_uid = data.get("hostUid")  # Backward compatibility fallback
+    if not host_uid:
+        raise HTTPException(status_code=500, detail="Event missing host identifier")
+    
     if not (host_uid == claims["uid"] or bool(claims.get("admin"))):
         raise HTTPException(status_code=403, detail="Forbidden")
 
