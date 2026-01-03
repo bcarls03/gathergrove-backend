@@ -245,8 +245,8 @@ def _rsvp_summary(event_id: str, uid: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 EventType = Literal["now", "future"]
-# ✅ UPDATED: Added 3 new categories (food, celebrations, sports) - now 8 total
-Category = Literal["neighborhood", "playdate", "help", "pet", "food", "celebrations", "sports", "other"]
+Category = Literal["neighborhood", "playdate", "help", "pet", "other"]
+
 
 def _normalize_event_keys(v: Any) -> Any:
     if isinstance(v, dict):
@@ -283,13 +283,7 @@ class EventIn(BaseModel):
         default=None,
         validation_alias="category",
         serialization_alias="category",
-        description='One of: "neighborhood", "playdate", "help", "pet", "food", "celebrations", "sports", "other"',
-    )
-    
-    # ✅ NEW: Visibility for viral loop (default: public)
-    visibility: Optional[Literal["private", "link_only", "public"]] = Field(
-        default="public",
-        description="Who can see this event? private=host only, link_only=anyone with link, public=discovery"
+        description='One of: "neighborhood", "playdate", "help", "pet", "other"',
     )
 
     @model_validator(mode="before")
@@ -319,9 +313,6 @@ class EventPatch(BaseModel):
     category: Optional[Category] = Field(
         default=None, validation_alias="category", serialization_alias="category"
     )
-    
-    # ✅ NEW: Can update visibility
-    visibility: Optional[Literal["private", "link_only", "public"]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -378,13 +369,6 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
         expires_at = _aware(body.expires_at) if body.expires_at else None
         end_at = _aware(body.end_at) if body.end_at else None
 
-    # Generate shareable link for link_only or public events
-    event_id = uuid.uuid4().hex
-    visibility = body.visibility  # Will use default 'public' from model
-    shareable_link = None
-    if visibility in ('link_only', 'public'):
-        shareable_link = f"/e/{event_id[:12]}"  # Short link using first 12 chars
-
     payload: Dict[str, Any] = {
         "type": body.type,
         "title": body.title.strip(),
@@ -395,14 +379,13 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
         "capacity": body.capacity,
         "neighborhoods": list(body.neighborhoods or []),
         "category": body.category or "other",
-        "host_user_id": claims["uid"],  # ✅ Changed from hostUid to host_user_id (individual)
-        "visibility": visibility,  # ✅ NEW: private/link_only/public
-        "shareable_link": shareable_link,  # ✅ NEW: short link for viral loop
+        "hostUid": claims["uid"],
         "status": "active",  # ✅ default
         "createdAt": now,
         "updatedAt": now,
     }
 
+    event_id = uuid.uuid4().hex
     ref = db.collection("events").document(event_id)
     ref.set(payload, merge=False)
 
@@ -546,9 +529,7 @@ def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     current = snap.to_dict() or {}
-    # ✅ Changed from hostUid to host_user_id (individual user)
-    host_uid = current.get("host_user_id") or current.get("hostUid")  # Backward compatibility
-    if host_uid != claims["uid"] and not claims.get("admin"):
+    if current.get("hostUid") != claims["uid"] and not claims.get("admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     updates: Dict[str, Any] = {}
@@ -569,16 +550,6 @@ def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
         updates["neighborhoods"] = list(body.neighborhoods)
     if body.category is not None:
         updates["category"] = body.category
-    
-    # ✅ NEW: Support visibility updates
-    if body.visibility is not None:
-        updates["visibility"] = body.visibility
-        # Regenerate shareable_link if changing to link_only or public
-        if body.visibility in ('link_only', 'public'):
-            if not current.get("shareable_link"):
-                updates["shareable_link"] = f"/e/{event_id[:12]}"
-        elif body.visibility == 'private':
-            updates["shareable_link"] = None
 
     if updates:
         updates["updatedAt"] = _now()
@@ -602,9 +573,7 @@ def cancel_event(event_id: str, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     current = snap.to_dict() or {}
-    # ✅ Changed from hostUid to host_user_id (individual user)
-    host_uid = current.get("host_user_id") or current.get("hostUid")  # Backward compatibility
-    if host_uid != claims["uid"] and not claims.get("admin"):
+    if current.get("hostUid") != claims["uid"] and not claims.get("admin"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     now = _now()
@@ -861,8 +830,7 @@ def delete_event(event_id: str, claims=Depends(verify_token)):
         raise HTTPException(status_code=404, detail="Event not found")
 
     data = snap.to_dict() or {}
-    # ✅ Changed from hostUid to host_user_id (individual user)
-    host_uid = data.get("host_user_id") or data.get("hostUid")  # Backward compatibility
+    host_uid = data.get("hostUid")
     if not (host_uid == claims["uid"] or bool(claims.get("admin"))):
         raise HTTPException(status_code=403, detail="Forbidden")
 
