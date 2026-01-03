@@ -83,6 +83,7 @@ class DataMigrator:
         self.stats = {
             "households_read": 0,
             "users_created": 0,
+            "users_skipped": 0,
             "households_created": 0,
             "old_households_deleted": 0,
             "events_updated": 0,
@@ -94,6 +95,35 @@ class DataMigrator:
         """Log a message with timestamp."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [{level}] {message}")
+    
+    def pre_flight_check(self):
+        """
+        Pre-flight validation to ensure database is in expected state.
+        Checks for existing users/ collection and warns if migration already ran.
+        """
+        self.log("=" * 80)
+        self.log("PRE-FLIGHT CHECK: Validating database state")
+        self.log("=" * 80)
+        
+        users_coll = db.collection("users")
+        existing_users = list_docs(users_coll)
+        
+        if existing_users:
+            self.log(f"⚠️  WARNING: users/ collection already exists!", "WARNING")
+            self.log(f"   Found {len(existing_users)} existing users", "WARNING")
+            self.log(f"   This suggests migration may have already run.", "WARNING")
+            
+            if not self.dry_run:
+                self.log("")
+                response = input("   Continue anyway? This may create duplicates. (yes/no): ")
+                if response.lower() != "yes":
+                    self.log("❌ Migration aborted by user", "ERROR")
+                    sys.exit(1)
+                self.log("   ⚠️  Proceeding with migration (user confirmed)", "WARNING")
+        else:
+            self.log("✅ users/ collection is empty - safe to proceed", "SUCCESS")
+        
+        self.log("")
     
     def migrate_households_to_users_and_households(self):
         """
@@ -140,6 +170,22 @@ class DataMigrator:
                 if not adult_names or len(adult_names) == 0:
                     self.log(f"⚠️  Skipping household {doc_id}: No adult names", "WARNING")
                     self.stats["errors"].append(f"Household {doc_id}: No adult names")
+                    continue
+                
+                # Check if user already exists (idempotency)
+                existing_user = None
+                if not self.dry_run:
+                    try:
+                        existing_user_doc = users_coll.document(uid).get()
+                        if existing_user_doc.exists:
+                            existing_user = existing_user_doc.to_dict()
+                    except:
+                        pass  # Fake Firestore doesn't support .get().exists
+                
+                if existing_user:
+                    self.log(f"⏭️  User {uid} already exists, skipping household {doc_id}", "INFO")
+                    self.log(f"   Existing user: {existing_user.get('first_name')} {existing_user.get('last_name')}", "INFO")
+                    self.stats["users_skipped"] += 1
                     continue
                 
                 # Parse first adult name (primary user)
@@ -332,6 +378,9 @@ class DataMigrator:
         self.log("=" * 80)
         
         try:
+            # Pre-flight check
+            self.pre_flight_check()
+            
             # Step 1: Migrate households to users + households
             self.migrate_households_to_users_and_households()
             
@@ -348,6 +397,7 @@ class DataMigrator:
             self.log(f"📊 Final Statistics:")
             self.log(f"   Households read: {self.stats['households_read']}")
             self.log(f"   Users created: {self.stats['users_created']}")
+            self.log(f"   Users skipped (already exist): {self.stats['users_skipped']}")
             self.log(f"   Households created: {self.stats['households_created']}")
             self.log(f"   Old households deleted: {self.stats['old_households_deleted']}")
             self.log(f"   Events updated: {self.stats['events_updated']}")

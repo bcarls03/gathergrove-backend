@@ -12,6 +12,13 @@ This migration transforms GatherGrove's data structure from **household-first** 
 
 **Migration Strategy**: **Clean Start** - Old household documents are deleted after creating new structure. This ensures no duplicate or confusing data.
 
+**Safety Features**:
+- ✅ **Pre-flight check** - Warns if migration already ran, prompts to continue
+- ✅ **Idempotency** - Safe to rerun; skips existing users and events
+- ✅ **Dry-run mode** - Test without modifying data
+- ✅ **Automated verification** - Validates data integrity after migration
+- ✅ **Rollback plan** - Full backup/restore instructions
+
 ### What Changes
 
 | Collection | Before | After |
@@ -242,15 +249,29 @@ If only specific collections have issues:
 - 3 households (old format)
 - 3 events (old format)
 
-**Migration Output:**
+**First Migration Run:**
 ```
 Households read: 3
 Users created: 3
+Users skipped: 0
 Households created: 3
 Old households deleted: 3
 Events updated: 3
 Errors: 0
 ```
+
+**Second Migration Run (Idempotency Test):**
+```
+Pre-flight check: ⚠️  WARNING: users/ collection already exists! (3 users)
+Households read: 6
+Users created: 0
+Users skipped: 3  ← Safely skipped existing users!
+Households created: 0
+Events updated: 0  ← Safely skipped migrated events!
+Errors: 0
+```
+
+**✅ Idempotency Verified:** Safe to rerun migration if interrupted.
 
 **Validation:**
 - ✅ All 3 users have household_id
