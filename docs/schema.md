@@ -66,6 +66,36 @@ For MVP, favorites are stored on the user doc:
 
 ---
 
+## 🤝 Connections *(MVP)*
+**Collection:** `connections`  
+**Purpose:** Household-to-household connections following "earned trust" principle.
+
+**Fields**
+- `id` (string, **doc ID**)
+- `from_household_id` (string → ref `households/{id}`) — household that initiated request
+- `to_household_id` (string → ref `households/{id}`) — household that received request
+- `status` (enum: `pending`, `accepted`, `declined`)
+- `requested_at` (timestamp, UTC)
+- `responded_at` (timestamp, UTC, optional)
+- `created_at` (timestamp, UTC)
+- `updated_at` (timestamp, UTC)
+
+**Rules:**
+- Either household can initiate connection request
+- Recipient must accept for connection to be established (`status: "accepted"`)
+- Either household can remove connection at any time
+- Connections are bidirectional when accepted
+- Prevents duplicate connections in either direction
+
+**API Endpoints:**
+- `GET /api/connections` — List all connections for user's household
+- `GET /api/connections?status=accepted` — Filter by status
+- `POST /api/connections` — Send connection request (body: `{household_id}`)
+- `PATCH /api/connections/{id}` — Accept/decline request (body: `{status}`)
+- `DELETE /api/connections/{id}` — Remove connection
+
+---
+
 ## 📬 Posts *(Future-ready)*
 **Collection:** `posts` *(planned)*  
 - `id` (string, **doc ID**)  
