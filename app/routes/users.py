@@ -20,11 +20,11 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from app.core.firebase import db
-from app.deps.auth import verify_token
+from app.deps.auth import verify_token, require_user
 from app.models.user import (
     UserProfile,
     UserProfileUpdate,
@@ -161,6 +161,28 @@ def get_my_profile(claims=Depends(verify_token)):
     return _jsonify(profile)
 
 
+@router.get("/profiles", response_model=list[UserProfileOut])
+def get_user_profiles(
+    uids: str = Query(..., description="Comma-separated list of user IDs"),
+    claims=Depends(verify_token)
+):
+    """
+    Get profiles for multiple users by their UIDs.
+    
+    Used for fetching household member details.
+    Returns only found profiles (silently skips missing ones).
+    """
+    uid_list = [uid.strip() for uid in uids.split(",") if uid.strip()]
+    
+    profiles = []
+    for uid in uid_list:
+        profile = _get_user_profile(uid)
+        if profile:
+            profiles.append(_jsonify(profile))
+    
+    return profiles
+
+
 @router.patch("/me", response_model=UserProfileOut)
 def update_my_profile(
     body: UserProfileUpdate,
@@ -170,16 +192,38 @@ def update_my_profile(
     Update the current user's profile.
     
     All fields are optional. Only provided fields will be updated.
+    
+    DEV MODE: Auto-creates user if they don't exist (for testing convenience)
     """
     uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
     
     # Check if user exists
     profile = _get_user_profile(uid)
     if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found. Please complete signup first."
-        )
+        # DEV MODE: Auto-create user instead of failing
+        # This handles cases where in-memory Firestore was cleared
+        now = _now()
+        profile = {
+            "uid": uid,
+            "email": email,
+            "first_name": "",
+            "last_name": "",
+            "profile_photo_url": None,
+            "bio": None,
+            "address": None,
+            "lat": None,
+            "lng": None,
+            "discovery_opt_in": True,
+            "visibility": "neighbors",
+            "household_id": None,
+            "interests": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        ref = db.collection("users").document(uid)
+        ref.set(profile)
+        print(f"ℹ️  Auto-created user profile for {uid} (dev mode convenience)")
     
     # Build update dict (only include provided fields)
     updates: Dict[str, Any] = {}
@@ -235,16 +279,37 @@ def create_household(
     
     Household is optional! Singles and couples don't need households.
     This is typically used by families with kids.
+    
+    DEV MODE: Auto-creates user if they don't exist (for testing convenience)
     """
     uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
     
     # Check if user exists
     profile = _get_user_profile(uid)
     if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found. Please complete signup first."
-        )
+        # DEV MODE: Auto-create user instead of failing
+        now = _now()
+        profile = {
+            "uid": uid,
+            "email": email,
+            "first_name": "",
+            "last_name": "",
+            "profile_photo_url": None,
+            "bio": None,
+            "address": None,
+            "lat": None,
+            "lng": None,
+            "discovery_opt_in": True,
+            "visibility": "neighbors",
+            "household_id": None,
+            "interests": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        ref = db.collection("users").document(uid)
+        ref.set(profile)
+        print(f"ℹ️  Auto-created user profile for {uid} (dev mode convenience)")
     
     # Check if user is already in a household
     if profile.get("household_id"):
@@ -277,6 +342,10 @@ def create_household(
         "household_id": household_id,
         "updated_at": now
     }, merge=True)
+    
+    # DEBUG: Verify the household_id was actually saved
+    updated_profile = user_ref.get().to_dict()
+    print(f"🔍 DEBUG: After household creation, user profile household_id = {updated_profile.get('household_id')}")
     
     return _jsonify(household_data)
 
@@ -406,12 +475,15 @@ def get_my_household(claims=Depends(verify_token)):
     # Get user profile
     profile = _get_user_profile(uid)
     if not profile:
+        print(f"🔍 DEBUG: get_my_household - User profile not found for uid={uid}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found"
         )
     
     household_id = profile.get("household_id")
+    print(f"🔍 DEBUG: get_my_household - User {uid} has household_id={household_id}")
+    
     if not household_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -421,9 +493,582 @@ def get_my_household(claims=Depends(verify_token)):
     # Get household
     household = _get_household(household_id)
     if not household:
+        print(f"🔍 DEBUG: get_my_household - Household {household_id} not found in Firestore")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Household {household_id} not found"
         )
     
     return _jsonify(household)
+
+
+# ============================================================================
+# Get Suggested Neighborhood Groups
+# ============================================================================
+
+@router.get("/me/suggested-groups")
+def get_suggested_neighborhood_groups(user: Dict = Depends(require_user)):
+    """
+    Get neighborhood groups that match the user's address/location.
+    Returns suggested groups without auto-joining the user.
+    
+    For HOAs, also extracts potential HOA name from user's address.
+    """
+    uid = user["uid"]
+    
+    # Get user profile
+    profile = _get_user_profile(uid)
+    
+    user_lat = profile.get('lat')
+    user_lng = profile.get('lng')
+    user_address = profile.get('address', '').lower()
+    
+    # Need location to suggest groups
+    if not user_lat or not user_lng:
+        return {"suggested_groups": [], "hoa_name_hint": None}
+    
+    suggested_groups = []
+    
+    # Extract potential HOA name from address
+    hoa_name_hint = _extract_hoa_name_from_address(user_address)
+    
+    # Query all neighborhood groups from Firestore
+    try:
+        groups_ref = db.collection("groups").where("type", "==", "neighborhood")
+        groups_docs = groups_ref.stream()
+        
+        for group_doc in groups_docs:
+            group_id = group_doc.id
+            group_data = group_doc.to_dict()
+            
+            if not group_data:
+                continue
+            
+            # Check if user matches this group
+            if _should_join_neighborhood(user_lat, user_lng, user_address, group_data):
+                # Check if user is already a member
+                members = group_data.get('members', [])
+                is_member = any(m.get('user_id') == uid for m in members)
+                
+                if not is_member:
+                    # Add to suggestions
+                    suggested_groups.append({
+                        'id': group_id,
+                        'name': group_data.get('name'),
+                        'type': group_data.get('type'),
+                        'metadata': group_data.get('metadata', {}),
+                        'member_count': len(members)
+                    })
+    
+    except Exception as e:
+        print(f"⚠️  Error fetching suggested groups: {e}")
+        return {"suggested_groups": [], "hoa_name_hint": None}
+    
+    return {
+        "suggested_groups": suggested_groups,
+        "hoa_name_hint": hoa_name_hint  # Frontend can use this to pre-fill HOA creation form
+    }
+
+
+@router.post("/me/join-group/{group_id}")
+def join_neighborhood_group(group_id: str, user: Dict = Depends(require_user)):
+    """
+    Join a neighborhood group by ID.
+    
+    For HOA groups (metadata.neighborhood_type == 'hoa'):
+    - New members start with verification_status='pending'
+    - Requires 2 verified neighbors or admin approval
+    
+    For other groups:
+    - Instant join with verification_status='admin_verified'
+    """
+    uid = user["uid"]
+    
+    # Get group from Firestore
+    group_ref = db.collection("groups").document(group_id)
+    group_doc = group_ref.get()
+    
+    if not group_doc.exists:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group_data = group_doc.to_dict()
+    members = group_data.get('members', [])
+    metadata = group_data.get('metadata', {})
+    
+    # Check if already a member
+    is_member = any(m.get('user_id') == uid for m in members)
+    
+    if is_member:
+        return {"message": "Already a member of this group"}
+    
+    # Determine verification status based on group type
+    is_hoa = (
+        group_data.get('type') == 'neighborhood' and 
+        metadata.get('neighborhood_type') == 'hoa'
+    )
+    
+    verification_status = 'pending' if is_hoa else 'admin_verified'
+    
+    # Add user as member
+    members.append({
+        'user_id': uid,
+        'role': 'member',
+        'joined_at': datetime.now(timezone.utc).isoformat(),
+        'verification_status': verification_status,
+        'verified_by': []  # Will be populated when neighbors vouch
+    })
+    
+    # Update group
+    group_ref.update({'members': members})
+    
+    if is_hoa and verification_status == 'pending':
+        return {
+            "message": f"Join request sent to {group_data.get('name')}. Pending verification.",
+            "verification_status": "pending"
+        }
+    else:
+        return {
+            "message": f"Successfully joined {group_data.get('name')}",
+            "verification_status": "admin_verified"
+        }
+
+
+@router.delete("/me/leave-group/{group_id}")
+def leave_neighborhood_group(group_id: str, user: Dict = Depends(require_user)):
+    """
+    Leave a neighborhood group by ID.
+    """
+    uid = user["uid"]
+    
+    # Get group from Firestore
+    group_ref = db.collection("groups").document(group_id)
+    group_doc = group_ref.get()
+    
+    if not group_doc.exists:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group_data = group_doc.to_dict()
+    members = group_data.get('members', [])
+    
+    # Check if user is a member
+    is_member = any(m.get('user_id') == uid for m in members)
+    
+    if not is_member:
+        return {"message": "Not a member of this group"}
+    
+    # Remove user from members
+    members = [m for m in members if m.get('user_id') != uid]
+    
+    # Update group
+    group_ref.update({'members': members})
+    
+    return {"message": f"Successfully left {group_data.get('name')}"}
+
+
+@router.post("/groups/{group_id}/vouch-for-member")
+def vouch_for_member(
+    group_id: str,
+    member_user_id: str,
+    user: Dict = Depends(require_user)
+):
+    """
+    Vouch for a pending member in an HOA group.
+    
+    Requirements:
+    - Voucher must be a verified member (verification_status = 'admin_verified' or 'neighbor_vouched')
+    - Member must be in 'pending' status
+    - Once 2 verified members vouch, status changes to 'neighbor_vouched'
+    """
+    uid = user["uid"]
+    
+    # Get group
+    group_ref = db.collection("groups").document(group_id)
+    group_doc = group_ref.get()
+    
+    if not group_doc.exists:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group_data = group_doc.to_dict()
+    members = group_data.get('members', [])
+    
+    # Find voucher (current user)
+    voucher = next((m for m in members if m.get('user_id') == uid), None)
+    if not voucher:
+        raise HTTPException(status_code=403, detail="You must be a member to vouch")
+    
+    # Check voucher is verified
+    voucher_status = voucher.get('verification_status', 'admin_verified')
+    if voucher_status == 'pending':
+        raise HTTPException(status_code=403, detail="Only verified members can vouch for others")
+    
+    # Find member to vouch for
+    member_index = next(
+        (i for i, m in enumerate(members) if m.get('user_id') == member_user_id),
+        None
+    )
+    
+    if member_index is None:
+        raise HTTPException(status_code=404, detail="Member not found in this group")
+    
+    member = members[member_index]
+    
+    # Check member is pending
+    if member.get('verification_status') != 'pending':
+        return {"message": "Member is already verified"}
+    
+    # Add vouch
+    verified_by = member.get('verified_by', [])
+    if uid in verified_by:
+        return {"message": "You have already vouched for this member"}
+    
+    verified_by.append(uid)
+    members[member_index]['verified_by'] = verified_by
+    
+    # Check if threshold reached (2 vouches)
+    if len(verified_by) >= 2:
+        members[member_index]['verification_status'] = 'neighbor_vouched'
+        message = f"Member verified by neighbors! ({len(verified_by)} vouches)"
+    else:
+        message = f"Vouch recorded. {2 - len(verified_by)} more vouch(es) needed."
+    
+    # Update group
+    group_ref.update({'members': members})
+    
+    return {
+        "message": message,
+        "verification_status": members[member_index]['verification_status'],
+        "vouch_count": len(verified_by)
+    }
+
+
+@router.post("/groups/{group_id}/verify-member")
+def admin_verify_member(
+    group_id: str,
+    member_user_id: str,
+    approve: bool,
+    user: Dict = Depends(require_user)
+):
+    """
+    Admin verification of a member (HOA board member only).
+    
+    - Admins can approve or reject members
+    - Approval sets verification_status to 'admin_verified'
+    - Rejection sets back to 'pending' or removes member
+    """
+    uid = user["uid"]
+    
+    # Get group
+    group_ref = db.collection("groups").document(group_id)
+    group_doc = group_ref.get()
+    
+    if not group_doc.exists:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group_data = group_doc.to_dict()
+    members = group_data.get('members', [])
+    
+    # Check if current user is admin
+    admin = next((m for m in members if m.get('user_id') == uid), None)
+    if not admin or admin.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="Only HOA admins can verify members")
+    
+    # Find member to verify
+    member_index = next(
+        (i for i, m in enumerate(members) if m.get('user_id') == member_user_id),
+        None
+    )
+    
+    if member_index is None:
+        raise HTTPException(status_code=404, detail="Member not found in this group")
+    
+    if approve:
+        # Approve member
+        members[member_index]['verification_status'] = 'admin_verified'
+        members[member_index]['verified_by'] = [uid]  # Track admin who verified
+        message = "Member approved by HOA admin"
+    else:
+        # Reject member - remove from group
+        members.pop(member_index)
+        message = "Member removed from group"
+    
+    # Update group
+    group_ref.update({'members': members})
+    
+    return {"message": message, "approved": approve}
+
+
+@router.get("/groups/{group_id}/pending-members")
+def get_pending_members(group_id: str, user: Dict = Depends(require_user)):
+    """
+    Get list of pending members for admin review.
+    
+    Only admins can see pending members.
+    Returns members with verification_status='pending' or 'neighbor_vouched'
+    """
+    uid = user["uid"]
+    
+    # Get group
+    group_ref = db.collection("groups").document(group_id)
+    group_doc = group_ref.get()
+    
+    if not group_doc.exists:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    group_data = group_doc.to_dict()
+    members = group_data.get('members', [])
+    
+    # Check if current user is admin
+    admin = next((m for m in members if m.get('user_id') == uid), None)
+    if not admin or admin.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="Only HOA admins can view pending members")
+    
+    # Filter pending/neighbor-vouched members
+    pending_members = [
+        {
+            'user_id': m.get('user_id'),
+            'joined_at': m.get('joined_at'),
+            'verification_status': m.get('verification_status'),
+            'vouch_count': len(m.get('verified_by', []))
+        }
+        for m in members
+        if m.get('verification_status') in ['pending', 'neighbor_vouched']
+    ]
+    
+    return {
+        "group_name": group_data.get('name'),
+        "pending_members": pending_members,
+        "count": len(pending_members)
+    }
+
+
+# ============================================================================
+# Auto-Join Neighborhood Groups Helper (DEPRECATED - keeping for reference)
+# ============================================================================
+
+def _auto_join_neighborhood_groups(uid: str, user_data: Dict[str, Any]) -> None:
+    """
+    Automatically add user to matching neighborhood groups based on their address.
+    
+    This function:
+    1. Queries all neighborhood groups
+    2. Checks if user's location matches group criteria
+    3. Auto-adds user as a member if they match
+    
+    Matching strategies:
+    - Apartment complexes: Exact address match
+    - Geographic neighborhoods: Radius-based distance check
+    - HOAs/Subdivisions: Boundary polygon check (future)
+    """
+    user_lat = user_data.get('lat')
+    user_lng = user_data.get('lng')
+    user_address = user_data.get('address', '').lower()
+    
+    # Need location to auto-join
+    if not user_lat or not user_lng:
+        return
+    
+    # Query all neighborhood groups from Firestore
+    try:
+        groups_ref = db.collection("groups").where("type", "==", "neighborhood")
+        groups_docs = groups_ref.stream()
+        
+        for group_doc in groups_docs:
+            group_id = group_doc.id
+            group_data = group_doc.to_dict()
+            
+            if not group_data:
+                continue
+            
+            # Check if user should join this group
+            if _should_join_neighborhood(user_lat, user_lng, user_address, group_data):
+                # Check if user is already a member
+                members = group_data.get('members', [])
+                is_member = any(m.get('user_id') == uid for m in members)
+                
+                if not is_member:
+                    # Auto-add user as member
+                    members.append({
+                        'user_id': uid,
+                        'role': 'member',
+                        'joined_at': datetime.now(timezone.utc).isoformat()
+                    })
+                    
+                    # Update group in Firestore
+                    db.collection("groups").document(group_id).update({'members': members})
+                    
+                    print(f"✅ Auto-joined user {uid} to neighborhood group {group_data.get('name')}")
+    
+    except Exception as e:
+        # Log error but don't fail the profile update
+        print(f"⚠️  Error auto-joining neighborhood groups: {e}")
+
+
+def _extract_hoa_name_from_address(address: str) -> Optional[str]:
+    """
+    Extract potential HOA/subdivision name from an address.
+    
+    Examples:
+        "789 Oakwood Hills Dr, Portland, OR 97203" → "Oakwood Hills"
+        "123 Cedar Ridge Ln, Beaverton, OR 97006" → "Cedar Ridge"
+        "456 Maple Grove Ct, Tigard, OR 97223" → "Maple Grove"
+        "789 SW Main St, Portland, OR 97205" → None (street name, not HOA)
+    
+    Strategy:
+    1. Look for multi-word patterns before street suffixes (Dr, Ln, Ct, Way, etc.)
+    2. Filter out directional prefixes (SW, NE, etc.)
+    3. Prioritize 2-3 word combinations that sound like subdivision names
+    """
+    import re
+    
+    if not address:
+        return None
+    
+    # Normalize address
+    addr_lower = address.lower()
+    
+    # Common street suffixes to identify where street name ends
+    street_suffixes = [
+        'drive', 'dr', 'lane', 'ln', 'court', 'ct', 'way', 'street', 'st',
+        'avenue', 'ave', 'road', 'rd', 'circle', 'cir', 'place', 'pl',
+        'boulevard', 'blvd', 'parkway', 'pkwy', 'terrace', 'ter'
+    ]
+    
+    # Directional prefixes to ignore
+    directionals = ['north', 'n', 'south', 's', 'east', 'e', 'west', 'w',
+                   'northeast', 'ne', 'northwest', 'nw', 'southeast', 'se', 'southwest', 'sw']
+    
+    # Common single words that likely aren't HOA names (too generic)
+    generic_words = ['main', 'first', 'second', 'third', 'oak', 'pine', 'elm',
+                     'maple', 'cedar', 'birch', 'willow']
+    
+    # Extract the street portion (before city/state/zip)
+    # Pattern: number + words + suffix
+    # Example: "789 Oakwood Hills Dr" from "789 Oakwood Hills Dr, Portland, OR 97203"
+    street_pattern = r'^\d+\s+(.+?)(?:,|$)'
+    match = re.search(street_pattern, addr_lower)
+    
+    if not match:
+        return None
+    
+    street_portion = match.group(1).strip()
+    
+    # Remove directional prefix if present
+    words = street_portion.split()
+    if words and words[0] in directionals:
+        words = words[1:]
+    
+    # Find the street suffix
+    suffix_idx = -1
+    for i, word in enumerate(words):
+        if word.rstrip('.') in street_suffixes:
+            suffix_idx = i
+            break
+    
+    if suffix_idx <= 0:
+        return None
+    
+    # Extract words before the suffix
+    name_words = words[:suffix_idx]
+    
+    # Need at least 1 word for potential subdivision name
+    # Allow single-word names like "Nicole Lane" or "Riverside Drive"
+    if len(name_words) < 1:
+        return None
+    
+    # For single-word names, skip if too generic (but allow proper names)
+    if len(name_words) == 1:
+        word = name_words[0]
+        # Skip generic words unless they're capitalized (suggesting proper name)
+        if word in generic_words:
+            return None
+    
+    # Capitalize each word and join
+    hoa_name = ' '.join(word.capitalize() for word in name_words)
+    
+    return hoa_name
+
+
+def _should_join_neighborhood(
+    lat: float, 
+    lng: float, 
+    address: str, 
+    group_data: Dict[str, Any]
+) -> bool:
+    """
+    Determine if user should auto-join this neighborhood group.
+    
+    Returns True if user's location matches group criteria.
+    """
+    metadata = group_data.get('metadata', {})
+    neighborhood_type = metadata.get('neighborhood_type', '')
+    
+    # Strategy 1: Apartment Complex - Exact address match
+    if neighborhood_type == 'apartment_complex':
+        building_address = metadata.get('building_address', '').lower()
+        if building_address and building_address in address:
+            return True
+    
+    # Strategy 2: Radius-based neighborhoods (default for open neighborhoods)
+    if 'center_lat' in metadata and 'center_lng' in metadata:
+        center_lat = metadata.get('center_lat')
+        center_lng = metadata.get('center_lng')
+        radius_miles = metadata.get('radius_miles', 1.0)  # Default 1 mile radius
+        
+        distance = _calculate_distance_miles(lat, lng, center_lat, center_lng)
+        if distance <= radius_miles:
+            return True
+    
+    # Strategy 3: Address substring match (for named subdivisions/HOAs)
+    # Use smart extraction to match HOA name from user's address
+    if neighborhood_type in ['hoa', 'subdivision']:
+        # Try exact match first (subdivision_name in metadata)
+        subdivision_name = metadata.get('subdivision_name', '').lower()
+        if subdivision_name and subdivision_name in address:
+            return True
+        
+        # Try matching extracted HOA name from address
+        extracted_hoa = _extract_hoa_name_from_address(address)
+        group_name = group_data.get('name', '').lower()
+        
+        if extracted_hoa:
+            # Match if extracted HOA name is in group name
+            # Example: "Oakwood Hills" extracted from address matches "Oakwood Hills HOA" group
+            if extracted_hoa.lower() in group_name:
+                return True
+            
+            # Also check if it matches hoa_name in metadata
+            hoa_name_meta = metadata.get('hoa_name', '').lower()
+            if hoa_name_meta and extracted_hoa.lower() in hoa_name_meta:
+                return True
+    
+    # Future: Strategy 4 - Polygon boundary check
+    # if 'boundary_polygon' in metadata:
+    #     return _is_point_in_polygon(lat, lng, metadata['boundary_polygon'])
+    
+    return False
+
+
+def _calculate_distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """
+    Calculate distance between two lat/lng points in miles using Haversine formula.
+    """
+    from math import radians, sin, cos, sqrt, atan2
+    
+    # Earth's radius in miles
+    R = 3959.0
+    
+    # Convert to radians
+    lat1_rad = radians(lat1)
+    lng1_rad = radians(lng1)
+    lat2_rad = radians(lat2)
+    lng2_rad = radians(lng2)
+    
+    # Haversine formula
+    dlat = lat2_rad - lat1_rad
+    dlng = lng2_rad - lng1_rad
+    
+    a = sin(dlat / 2)**2 + cos(lat1_rad) * cos(lat2_rad) * sin(dlng / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    
+    distance = R * c
+    return distance

@@ -9,7 +9,7 @@
   </a>
 </p>
 
-**Backend API for GatherGrove** — A private, trust-based neighborhood social platform that connects families and households through events, profiles, and community engagement.
+**Backend API for GatherGrove** — The operating system for real-world gatherings.
 
 Built with **FastAPI + Firebase (Auth & Firestore)** | Python 3.12+ | RESTful API Architecture
 
@@ -17,7 +17,13 @@ Built with **FastAPI + Firebase (Auth & Firestore)** | Python 3.12+ | RESTful AP
 
 ## 📋 Table of Contents
 
-- [Overview](#-overview)
+- [Executive Summary](#-executive-summary)
+- [The Core Loop](#-the-core-loop)
+- [The One Metric That Matters](#-the-one-metric-that-matters)
+- [What GatherGrove Is (and Is NOT)](#-what-gathergrove-is-and-is-not)
+- [Information Architecture](#-information-architecture)
+- [Competitive Advantage](#-competitive-advantage)
+- [SWOT Analysis](#-swot-analysis)
 - [Quickstart](#-quickstart)
 - [Project Structure](#-project-structure)
 - [Core Features](#-core-features)
@@ -30,6 +36,8 @@ Built with **FastAPI + Firebase (Auth & Firestore)** | Python 3.12+ | RESTful AP
   - [Profile API](#-profile-api)
   - [Push Notifications API](#-push-notifications-api)
 - [Data Models](#-data-models)
+- [Feature Roadmap](#-feature-roadmap)
+- [Strategic Decisions](#-strategic-decisions)
 - [Authentication & Authorization](#-authentication--authorization)
 - [Development](#-development)
 - [Testing](#-testing)
@@ -38,15 +46,402 @@ Built with **FastAPI + Firebase (Auth & Firestore)** | Python 3.12+ | RESTful AP
 
 ---
 
-## 🎯 Overview
+## 🎯 Executive Summary
 
-GatherGrove is a neighborhood-focused social platform designed to strengthen community bonds through:
+### Vision & Purpose
 
-- **Event Management**: Create, discover, and RSVP to neighborhood events (happening now or scheduled)
-- **Household Directory**: Browse and filter families by neighborhood, household type, and children's ages
-- **User Profiles**: Personal profiles with favorites, visibility settings, and neighborhood preferences
-- **Push Notifications**: Real-time updates for events and community activity
-- **Trust-Based Security**: Firebase Authentication with role-based access control
+**GatherGrove is a calm neighborhood connection app that helps families:**
+
+1. **Discover** nearby households in the same life stage
+2. **Coordinate** simple real-life hangouts without group-text chaos  
+3. **Remember** those moments privately (optional, no social pressure)
+
+**Philosophy:** Calm, private, functional — anti-Nextdoor noise, more durable than one-off invite tools.
+
+---
+
+### The Core Problem
+
+**Three Gaps:**
+
+1. **Discovery Gap** — Families don't know who nearby they'd naturally click with (kids' ages, similar life stage, interests)
+2. **Coordination Friction** — Group texts/email chains bury details, create confusion, lack "source of truth"
+3. **Memory Loss** — Great gatherings happen, but photos/details get lost with no quiet, private archive
+
+**Existing solutions are either:**
+- **Too noisy** (Nextdoor = complaints/politics, Facebook = algorithmic feeds)
+- **Too isolated** (Partiful, Evite = one-off event tools, no community layer)
+- **Too chaotic** (Group texts = buried details, no history)
+
+---
+
+### The Solution: Discovery-First Coordination
+
+**GatherGrove helps families discover nearby households in the same life stage, coordinate simple real-world hangouts, and quietly preserve those moments — without social feeds, noise, or pressure.**
+
+**Core Thesis:**  
+**"Discovery is the long-term destination. Events are the short-term entry point."**
+
+- **For new users:** Events deliver first value (RSVP via link, no signup required)
+- **For established users:** Discovery becomes the hero (neighborhood graph, meaningful connections)
+- **For retention:** Memory creates quiet stickiness (optional, private archive)
+
+**Operating Model:** Discovery → Events → Memory
+
+- **Discovery** creates meaning ("people like us live here")
+- **Events** activate and coordinate (turn intent into action)  
+- **Memory** creates quiet stickiness (optional, private archive)
+
+---
+
+## 🔄 The Core Loop
+
+GatherGrove is built around a simple, powerful loop:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  DISCOVER → EVENT → ATTEND → REMEMBER → RECONNECT          │
+│      ↑                                              ↓       │
+│      └──────────────────────────────────────────────┘       │
+│                                                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+1. **DISCOVER** — Find nearby households in same life stage ("8 families with kids your age live here!")
+2. **EVENT** — Lightweight coordination (functional, not fancy)
+3. **ATTEND** — Real-world gatherings happen (the actual goal)
+4. **REMEMBER** — Optional photo archive (visible only to attendees, no pressure)
+5. **RECONNECT** — Connections deepen, discovery reveals more neighbors
+
+**The Moat:** Your neighborhood graph becomes irreplaceable. Discovery creates meaning. Events activate it. Memory preserves it.
+
+---
+
+## 🎯 North Star Metrics
+
+### **Primary: Weekly Active Households (WAH) with 3+ Connections**
+
+**Why This Matters:**
+- Measures **real neighborhood graph formation** (not vanity MAU)
+- 3+ connections = trust density achieved = platform becomes valuable
+- Once a household has 3+ connections, they're unlikely to leave
+
+**Target Benchmarks:**
+- **Week 1**: 30% of signups form 1+ connection
+- **Week 4**: 50% of active users have 3+ connections
+- **Month 6**: 70% retention for households with 3+ connections
+
+---
+
+### **Secondary: Event-to-Connection Conversion Rate**
+
+**What % of event attendees form at least one new connection?**
+
+**Why This Matters:**
+- Validates core thesis: "Events unlock discovery"
+- Helps debug why growth stalls or accelerates
+- If conversion is low, discovery UX needs work
+
+**Target:** 40%+ of event attendees request/accept a connection within 7 days
+
+---
+
+## ✅ Product Positioning (IS / IS NOT)
+
+### What GatherGrove IS
+- ✅ **Discovery-first neighborhood platform** (find families in same life stage)
+- ✅ **Lightweight coordination utility** (functional, not performative)
+- ✅ **Private, optional memory layer** (no social pressure, attendees-only)
+- ✅ **Calm alternative to social media** (no feeds, no infinite scroll)
+- ✅ **Trust-gated communication** (connection requests before messaging)
+
+### What GatherGrove is NOT
+- ❌ **A "pretty template" event competitor** (that's Partiful's lane)
+- ❌ **A social network** (no feeds, likes, followers, engagement optimization)
+- ❌ **A complaint forum** (no open neighborhood posting like Nextdoor)
+- ❌ **A chat replacement** (event-specific threads only, no endless DMs)
+
+### Primary User (Wedge Case)
+**Families with children (ages ~2-12) living in suburban or dense residential neighborhoods.**
+
+Not excluding others — just declaring the wedge.
+
+### Hard Design Rules We Follow
+
+**What We DON'T Build (Anti-Social-Media by Design):**
+- ❌ Public feed of all neighborhood activity
+- ❌ Like/reaction buttons (breeds comparison)
+- ❌ Follower/friend counts (no vanity metrics)
+- ❌ Algorithmic sorting (no engagement optimization)
+- ❌ Infinite scroll (content has natural end)
+- ❌ "Suggested content" (no time-wasting rabbit holes)
+- ❌ Unsolicited messaging (connection requests required first)
+
+**What We DO Build (Calm, Functional, Trust-First):**
+- ✅ **Discovery-first interface** (map/list of nearby households)
+- ✅ **Gated communication** (connection requests before DMs)
+- ✅ **Action-oriented language**: "Discover," "Connect," "Host" (not "Post," "Share," "Like")
+- ✅ **Warm visual design**: Earthy greens, soft yellows, "weather radar" calm (not social media blues/pinks)
+- ✅ **Private by default**: Discovery visible, communication gated
+- ✅ **Time-bound content**: Events expire naturally
+- ✅ **Quiet notifications**: Opt-in, essential updates only
+- ✅ **Instant opt-out**: Discovery can be turned off without losing core functionality
+
+### The North Star Test
+> **"Does this feature help people get offline and see each other?"**  
+> **If NO → Don't build it.**
+
+### Competitive Positioning (Explicit)
+**Why GatherGrove Wins:**
+- **Nextdoor** = noise & complaints
+- **Event tools** = one-off coordination
+- **Group texts** = chaos
+- **GatherGrove** = calm, durable neighborhood graph
+
+---
+
+## 🏗️ Information Architecture
+
+### Identity Model: Individual-First, Groups as Context
+
+**Core Principle:** Individuals are the root of trust. Groups organize people.
+
+```
+Individual Account (Primary - Source of Truth)
+│
+├── Profile (Individual Identity)
+│   ├── First/Last Name, Photo
+│   ├── Address (used for approximate distance only)
+│   ├── Privacy Controls (discovery opt-in, address visibility)
+│   └── Interests (adult-level, optional)
+│
+├── Linked Groups (Flexible Organizational Layer)
+│   ├── Household (optional linked group)
+│   │   ├── Household Type (Family w/ Kids, Singles/Couples, Empty Nesters)
+│   │   ├── Child Summary (age ranges + optional gender, NO NAMES/PHOTOS)
+│   │   └── Linked Adults (independent accounts)
+│   ├── Neighborhoods (discovery context, not ownership)
+│   ├── Extended Family (Phase 2+)
+│   ├── Interest Groups (Book Club, Sports Teams, etc.) (Phase 2+)
+│   └── Activity Groups (Schools, HOAs, Clubs) (Phase 3+)
+│
+├── Connections (Trust Graph - Gated Communication)
+│   ├── Connection Requests (sent/received)
+│   ├── Accepted Connections (mutual consent required)
+│   └── Messaging (only with accepted connections)
+│
+├── Events
+│   ├── Hosting (created by me) ✅ IMPLEMENTED
+│   ├── Attending (RSVP'd yes) ✅ IMPLEMENTED
+│   ├── Invited (pending RSVP) 🚧 PHASE 2
+│   └── Past Events (memory timeline) 🚧 PHASE 3
+│
+└── Discovery (The Hero Experience)
+    ├── Neighborhood Map/List ⚠️ PARTIAL
+    ├── Filters (household type, kids' ages, distance, interests) 🚧 PHASE 2
+    ├── Connection Prompts ("8 families with kids your age") 🚧 PHASE 2
+    └── Adaptive Empty States (density-aware) 🚧 PHASE 2
+```
+
+**Key Principles:**
+- **Individuals retain agency** — No one is listed/grouped without personal consent
+- **Groups provide context** — Households, neighborhoods are organizational layers, not primary identity
+- **Discovery visible, communication gated** — Anyone can browse, messaging requires connection acceptance
+- **Privacy always individual-controlled** — Group membership never overrides personal privacy settings
+
+---
+
+### Groups as Universal Organizing Layer
+
+GatherGrove uses a single, flexible "Group" construct to represent real-world social structures.
+
+**Groups are not hard-coded silos. They are containers for context.**
+
+**Group Types (Now and Later):**
+- ✅ **Neighborhoods** (MVP) — Geographic discovery context
+- ✅ **Households** (MVP) — Family unit grouping
+- 🚧 **Extended Families** (Phase 2) — Multi-household family connections
+- 🚧 **Activity Groups** (Phase 2) — Sports teams, clubs, book clubs
+- 🚧 **Interest Groups** (Phase 2) — Hiking buddies, dinner clubs
+- 🚧 **Organizations** (Phase 3) — HOAs, schools, churches
+
+**This design allows GatherGrove to:**
+- Start focused (neighborhood + household)
+- Expand naturally (activities, interests, extended families)
+- Avoid re-architecting as new use cases emerge
+
+---
+
+### Household as Linked Group (Not Primary Identity)
+
+Households are treated as a **linked group**, not a primary identity.
+- Users may **choose** to link themselves to a household
+- Adults can join, leave, or update household membership independently
+- The household functions as a **directory card for discovery**
+- Individual profiles remain the **source of truth**
+
+This preserves:
+- Individual consent
+- Clear ownership
+- Flexibility for non-traditional households
+
+---
+
+## 🔒 Privacy & Trust Framework
+
+### What Parents Are NOT Comfortable With
+- ❌ Exact addresses or exact map pins
+- ❌ Public visibility outside the community
+- ❌ Open/unsolicited messaging
+- ❌ Children's names, birthdays, schools, or photos
+- ❌ Being listed without explanation or control
+
+### What Parents ARE Comfortable With
+- ✅ Approximate distance ("~0.3 miles away")
+- ✅ Abstracted/blurred maps ("weather radar" vibe, not Google Maps precision)
+- ✅ Real family identity (last names help build trust)
+- ✅ Gated messaging (connection request first)
+- ✅ Kids represented by **age ranges** + optional gender (never names/photos)
+- ✅ Clear explanation + instant opt-out
+
+### Location & Discovery Rules (Non-Negotiable)
+
+**1. Never Show Exact Home Location**
+- Use soft dots/clusters and approximate distance labels
+- Calm "weather radar" vibe, not Google Maps precision
+- Distance shown as "~0.3mi" (approximate)
+
+**2. Discovery Visible, Communication Gated**
+- Anyone can browse households (discovery)
+- Messaging requires mutual connection acceptance (trust gate)
+- No phone/email shown by default
+
+**3. Discovery Can Be Turned Off Instantly**
+- App still works without discovery (events, connections remain)
+- Opt-out must never feel punitive
+- Re-enable anytime
+
+### Connection Requests (Trust Gate)
+
+**How It Works:**
+1. User sees interesting household in discovery
+2. Sends connection request (with optional message)
+3. Recipient accepts/declines
+4. Only after acceptance can messaging begin
+
+**Why This Matters:**
+- Prevents spam and harassment
+- Establishes "mutual intent" before communication
+- Creates trust density before opening DMs
+
+
+
+```
+Event Object
+│
+├── Basic Info
+│   ├── Title, Description ✅ IMPLEMENTED
+│   ├── Cover Photo 🚧 PHASE 2 (AI-generated or uploaded)
+│   ├── Date/Time (or "Happening Now") ✅ IMPLEMENTED
+│   ├── Location (address + map) ✅ IMPLEMENTED
+│   └── Host(s) ⚠️ SINGLE HOST ONLY (co-hosting in Phase 2)
+│
+├── Invitation Settings
+│   ├── Visibility (Private Link / Groups / Neighborhood) 🚧 PHASE 2
+│   ├── RSVP Deadline 🚧 PHASE 2
+│   ├── Capacity (optional) ✅ IMPLEMENTED
+│   └── RSVP Questions (dietary restrictions, etc.) 🚧 PHASE 2
+│
+├── Guest Management
+│   ├── Invited List (GatherGrove users + external) 🚧 PHASE 2
+│   ├── RSVP Status (Going / Maybe / No / Pending) ✅ IMPLEMENTED
+│   ├── Attendee Tracking (who actually showed up) 🚧 PHASE 3
+│   └── Event-specific messaging thread 🚧 PHASE 2
+│
+└── Post-Event (REMEMBER phase) 🚧 PHASE 3
+    ├── Photo Album (linked or uploaded)
+    ├── Attendee List (preserved permanently)
+    ├── Host Notes (recap, highlights)
+    └── "Host Again" button (one-tap duplicate)
+```
+
+**Legend:**
+- ✅ **Implemented** - Live in current backend
+- ⚠️ **Partial** - Exists but needs enhancement
+- 🚧 **Planned** - Roadmap for Phase 2-3
+
+---
+
+## 🏆 Competitive Advantage
+
+**Why GatherGrove Wins:**
+
+| Competitor | Their Problem | GatherGrove's Solution |
+|-----------|---------------|----------------------|
+| **Nextdoor** | Noise & complaints, toxic community | Calm discovery, gated communication, events-only |
+| **Partiful/Evite** | One-off coordination, no community | Discovery unlocks neighborhood graph, memory creates stickiness |
+| **Group texts** | Chaos, no source of truth | Structured events, clear RSVP states, persistent history |
+| **Facebook** | Algorithmic feeds, privacy concerns | No feeds, no ads, trust-first design |
+
+**The Moat:** Your neighborhood graph becomes irreplaceable.
+- Discovery creates meaning ("people like us live here")
+- Events activate connections (turn intent into action)
+- Memory preserves relationships (quiet stickiness)
+
+**Defend Against Copycats:**
+- **If Facebook launches "Neighbors"** → Emphasize privacy (they can't credibly claim this)
+- **If Nextdoor adds events** → Emphasize calm UX (they won't abandon their feed model)
+- **If Partiful adds discovery** → Emphasize memory (they haven't built this)
+
+---
+
+## 📊 SWOT Analysis
+
+### Strengths ✅
+1. **Discovery-first wedge** — "8 families with kids your age live here" is an instant value unlock
+2. **Gated communication** — Connection requests eliminate spam/harassment concerns
+3. **Clear differentiation** — Anti-social-media by design (no feeds, no infinite scroll, no noise)
+4. **Network effects** — More neighborhood users = better discovery = more valuable connections
+5. **Calm UX as moat** — Competitors can't copy "calm" without abandoning their engagement models
+6. **Macro tailwinds** — Loneliness epidemic + post-COVID IRL hunger = massive timing advantage
+
+### Weaknesses ⚠️
+1. **Chicken-egg problem** — Discovery features only work at 10-15 households per neighborhood
+2. **Density-dependent value** — Low-density neighborhoods struggle to show immediate value
+3. **Execution risk** — Must nail "weather radar" map UX (calm, not creepy)
+4. **Education needed** — Users must understand discovery ≠ unsolicited messaging
+5. **Monetization uncertainty** — Premium features need validation before scaling
+
+### Opportunities 🚀
+1. **Nextdoor fatigue** — Users tired of complaints/politics, hungry for positive alternative
+2. **Gen Z family formation** — New parents seeking neighborhood community (high LTV)
+3. **B2B verified communities** — HOAs/schools willing to pay for verified neighborhood tools
+4. **Babysitting marketplace** — Natural monetization lever for families (Phase 2)
+5. **International expansion** — Social fragmentation is global (UK, Australia, Canada)
+
+### Threats 🚨
+1. **Facebook/Nextdoor copies feature** — Distribution advantage if incumbents fix UX
+2. **Privacy regulations** — GDPR/CCPA could limit location-based discovery
+3. **Moderation burden** — Bad actors could abuse neighborhood discovery at scale
+4. **User skepticism** — "Another app?" fatigue (must prove value instantly)
+5. **Economic downturn** — Premium subscriptions harder to sell in recession
+
+### Likelihood of Success: 8.0/10 ⭐⭐⭐⭐⭐⭐⭐⭐
+
+**Why This High:**
+- ✅ Discovery-first wedge solves validated pain point ("Who lives near me?")
+- ✅ Gated communication addresses #1 trust concern (no spam)
+- ✅ Calm positioning is defensible (competitors trapped in engagement models)
+- ✅ Multiple revenue paths (freemium, babysitting, B2B)
+- ✅ Density-aware UX prevents "empty state" problem
+
+**Risks to Watch:**
+- Must nail first 60 seconds ("We found 8 families…" must feel magical)
+- Connection acceptance rate needs to be >60% (otherwise discovery feels isolating)
+- Need 10-15 households/neighborhood to hit critical mass
+
+**Bottom Line:** Discovery-first positioning + gated communication = differentiated wedge that incumbents can't easily copy.
 
 **Key Design Principles:**
 - Privacy-first: All data scoped to authenticated neighborhood members
@@ -150,42 +545,266 @@ gathergrove-backend/
 
 ---
 
-## 🎨 Core Features
+## 🎨 Core Product Areas
 
-### 1. Event Management
-- **Event Types**: 
-  - `now`: Happening right now (expires in 24h by default)
-  - `future`: Scheduled events with explicit start times
-- **Categories**: `neighborhood`, `playdate`, `help`, `pet`, `other`
-- **RSVPs**: Three-state system (`going`, `maybe`, `cant`/`declined`)
-- **Capacity Management**: Optional capacity limits enforced on `going` RSVPs
-- **Soft Cancellation**: Events can be canceled without deletion
-- **Filtering**: By neighborhood, time window (now/future), category
-- **Pagination**: Cursor-based pagination with opaque tokens
+### 1. Discovery (Neighborhood View - The Hero)
 
-### 2. User & Household Directory
-- **Households Collection**: Central household data store
-- **People API**: Derived view with advanced filters:
-  - Filter by children's age ranges (ageMin/ageMax)
-  - Search by last name (prefix matching)
-  - Filter by household type and neighborhood
-  - Cursor-based pagination
-- **Favorites System**: Users can favorite households for quick access
+**This is the primary value proposition for established users.**
 
-### 3. User Profiles
-- **Profile Settings**:
-  - Display name overrides
-  - Visibility control (`neighbors`, `private`, `public`)
-  - Bio/about section
-  - Notification preferences
-- **Relationship Management**:
-  - Favorites list (household IDs)
-  - Include/exclude lists for feed customization
+**Features:**
+- Map/list view of nearby households
+- Filters: household type, kids' age ranges, distance radius, interests
+- Household cards showing:
+  - Last name, approximate distance ("~0.3mi")
+  - Household type (Family w/ Kids, etc.)
+  - Child age ranges + optional gender (NO names/photos)
+  - Adult interests (optional)
+- **Adaptive Empty States** (density-aware):
+  - High density → "8 families with kids your age!" (hero CTA)
+  - Low density → "You're early 🎉" + invite prompts
+- **Connection Requests** (see Connections section)
 
-### 4. Push Notifications
-- **Token Management**: Register/update/delete device tokens
-- **Multi-Platform**: iOS, Android, Web support
-- **User-Scoped**: Tokens tied to authenticated users
+**Privacy Guardrails:**
+- Never show exact addresses (soft dots/clusters on map)
+- Distance shown as approximate ("~0.3mi")
+- "Weather radar" calm vibe, not Google Maps precision
+- Discovery can be turned off instantly (app still works)
+
+---
+
+### 2. Connections (Trust Gate)
+
+**Gated communication prevents spam and establishes mutual intent.**
+
+**Flow:**
+1. User discovers interesting household via map/list
+2. Sends connection request (with optional message)
+3. Recipient accepts/declines
+4. Only after acceptance can messaging begin
+
+**Why This Matters:**
+- Prevents unsolicited messaging (top parent concern)
+- Creates "mutual intent" before DMs
+- Builds trust density in neighborhood graph
+
+**States:**
+- Pending (request sent, awaiting response)
+- Accepted (can message)
+- Declined (no further action)
+
+---
+
+### 3. Events (Coordination + Growth Engine)
+
+**Lightweight event creation — functional, not fancy.**
+
+**Event Categories** (8 total):
+1. **🏡 Neighborhood** — Block parties, driveway hangs, cul-de-sac meetups
+2. **🎪 Playdate** — Park meetups, family fun
+3. **🤝 Help & Favors** — Borrow tools, rides, **babysitting requests** (see Babysitting section)
+4. **🐶 Pets** — Dog playtimes, pet sitting, lost/found
+5. **🍽️ Food & Dining** — Potlucks, dinners, restaurant outings
+6. **🎉 Celebrations** — Birthdays, holidays, milestones
+7. **⚽ Sports & Activities** — Pickup games, workouts, adventures
+8. **✨ Other** — Anything else
+
+**Event Timing Model:**
+- **Happening Now**: Events starting within 2 hours (🔴 "Live Now" badge)
+  - Badge appears automatically (time-based, not host-controlled)
+  - Persists until event end time
+- **Future Events**: Scheduled with time-bucket labels
+  - 🟢 "This Weekend", 🔵 "Next Week", ⚪ "Future"
+- **Single Events List**: One unified view with status badges (no separate tabs)
+
+**Invitation Options:**
+- Invite GatherGrove neighbors (via discovery)
+- Invite connections (accepted relationships)
+- Invite external (shareable link, no signup required to RSVP)
+
+**RSVP States:**
+- `going`: Confirmed attendance (counts toward capacity)
+- `maybe`: Tentative
+- `declined`: Not attending
+
+**Shareable Event Links:**
+- Text/email links for non-members
+- RSVP without signup (soft-entry growth)
+- "Created with GatherGrove" footer (viral attribution)
+
+---
+
+### 4. Memory (Optional, Private)
+
+**Quiet post-event prompt — no social pressure.**
+
+**Flow:**
+1. Event ends
+2. Quiet prompt: "Add photo / link album / skip"
+3. Photos visible only to attendees
+4. No feed, no likes, no public sharing
+
+**Why This Matters:**
+- Creates emotional stickiness
+- Preserves moments without performative pressure
+- Builds switching costs (your memories live here)
+
+**Phase 1 Scope:**
+- Manual photo upload or Google Photos link
+- Attendee-only visibility
+- Simple grid view
+
+---
+
+### 5. Onboarding Strategy (Progressive, Trust-First)
+
+**Goal:** Collect only what's needed, when it's needed. Minimize friction while building trust.
+
+**Authentication:**
+- Apple Sign-In / Google Sign-In (secure auth only, not for importing social graphs)
+- Identity remains individual-first, privacy-controlled, independent of external platforms
+
+**Step 1: Personal Identity** (Required)
+- First and last name
+- Optional photo
+- Address (used only for approximate distance)
+- Discovery enabled by default, with instant opt-out
+
+**Step 2: Household Context** (Required)
+User selects household unit:
+- Family w/ Kids
+- Singles / Couples
+- Empty Nesters
+
+This determines:
+- Which discovery filters apply
+- Whether child-related fields are shown
+
+**Step 3: Child Information** (Family Only, Required)
+- Child age (required for meaningful discovery)
+- Child gender (optional: Male / Female / Prefer not to say)
+- **NO child names, birthdays, schools, or photos**
+
+**Step 4: Interests** (Optional, Skippable)
+- Adult interests (per individual)
+- Child interests (per child, parent-entered)
+- Controlled vocabulary (no free text)
+
+**Step 5: Privacy Review** (Required)
+Plain-language preview showing:
+- What others can see
+- What is never shown
+- How to opt out instantly
+
+**Step 6: Immediate Value** 🎉
+**"We found X families near you…"**
+
+Discovery reinforces why the information was worth sharing.
+
+---
+
+### 6. Babysitting (MVP → Future Monetization Lever)
+
+**Purpose:** Enable trusted, local babysitting discovery within the neighborhood — starting simple, private, opt-in.
+
+**MVP Scope:**
+- During household setup, families with children can optionally mark a child as: **"Available for Babysitting"**
+- This is a visibility flag only (no payments, scheduling, or reviews in MVP)
+- Babysitting framed as neighborly help signal, not marketplace
+
+**How It Works (High-Level):**
+
+**1. Opt-In Flag**
+- Household toggles "Available for Babysitting" for eligible children
+- Child shown only as **Age + Gender** (no name), consistent with GatherGrove privacy standards
+
+**2. Discovery**
+- New "Babysitters" filter within People tab
+- Allows families to quickly see nearby households with babysitting availability
+
+**3. Requests**
+- Babysitting requests flow through existing "Help & Favors" category
+- All coordination happens via GatherGrove messaging (no public posts)
+
+**Guardrails & Trust (MVP):**
+- Fully opt-in
+- Neighborhood-only visibility
+- No ratings, reviews, or transactions in MVP
+
+**Future Expansion (Post-MVP / Premium):**
+- Optional verification badges (age confirmation, parental consent)
+- Reviews/references within neighborhood
+- Priority visibility or trust indicators as premium monetization lever
+
+**Positioning Principle:**
+> Babysitting in GatherGrove is about trusted neighbors helping neighbors, not building a gig marketplace.
+
+GatherGrove does not facilitate unsupervised introductions or payments in MVP.
+
+---
+
+### 7. Growth Model (Soft-Entry, Not Pushy)
+
+**Primary Growth Paths:**
+1. **Discovery-first signup** (immediate value: "8 families found!")
+2. **Event link invites** to non-members (RSVP without signup)
+3. **Word-of-mouth** after real hangouts ("We met on GatherGrove")
+
+**Principles:**
+- No contact scraping
+- No spammy invites
+- Signup happens when it clearly adds value (messaging, discovery, future invites)
+
+**Viral Coefficient Math:**
+- Target: 1.5+ (each user brings 1.5+ new users)
+- Current model: Each user invites 5 people:
+  - 3 neighbors (via discovery prompts)
+  - 2 external friends (via event links)
+- Conversion rates needed:
+  - 30% of invitees sign up
+  - 50% of signups create a connection or attend event
+- Math: 5 invites × 0.30 conversion × 0.50 activation = 0.75
+- **Need to optimize to reach 1.5 for true viral growth**
+
+**Levers to Pull:**
+- Increase invite prompts (currently 1, test 2-3)
+- Improve event link conversion (A/B test landing page)
+- Boost signup → connection creation (smart defaults, prompts)
+
+---
+
+### 8. Empty Discovery Handling (Must-Have)
+
+**Never show "No neighbors found" as a dead end.**
+
+**Instead, show adaptive CTAs based on density:**
+
+**Low Density (0-5 households):**
+```
+🎉 You're early!
+
+Be the first to bring GatherGrove to your neighborhood:
+1. Invite a neighbor
+2. Create an event (invite anyone)
+3. Share your event link
+```
+
+**Medium Density (6-15 households):**
+```
+Great start! 8 families nearby.
+
+Help grow your neighborhood:
+- Invite 2 more neighbors
+- Host an event this weekend
+```
+
+**High Density (15+ households):**
+```
+🎉 We found 23 families near you with kids your age!
+
+[View Discovery Map]
+```
+
+**Principle:** Discovery should show potential (teaser counts, progress state), not emptiness.
 
 ---
 
@@ -456,6 +1075,7 @@ curl -X PATCH http://127.0.0.1:8000/profile \
 
 ```typescript
 {
+  // ===== CORE FIELDS (✅ Implemented) =====
   id: string
   type: "now" | "future"
   title: string
@@ -465,13 +1085,51 @@ curl -X PATCH http://127.0.0.1:8000/profile \
   expiresAt?: timestamp    // UTC, defaults to startAt+24h for "now"
   capacity?: number        // Optional attendance cap
   neighborhoods: string[]  // e.g. ["Bay Hill", "Eagles Point"]
-  category?: "neighborhood" | "playdate" | "help" | "pet" | "other"
+  category?: "neighborhood" | "playdate" | "help" | "pet" | "food" | "celebration" | "sports" | "other"
   hostUid: string          // Event creator
   status?: "active" | "canceled"
   canceledAt?: timestamp
   canceledBy?: string
   createdAt: timestamp
   updatedAt: timestamp
+  
+  // ===== PHASE 2: Enhanced Event Structure (🚧 Planned) =====
+  coverImage?: string          // URL to AI-generated or uploaded image
+  coHosts?: string[]           // Array of user IDs (multi-host support)
+  visibility?: "private" | "link_only" | "neighborhood" | "public"
+  shareableLink?: string       // Public RSVP page URL (no login required)
+  rsvpDeadline?: timestamp     // UTC deadline for RSVPs
+  rsvpQuestions?: Array<{      // Custom questions for attendees
+    question: string
+    required: boolean
+  }>
+  
+  // ===== PHASE 2: Invitation Tracking (🚧 Planned) =====
+  invitedUserIds?: string[]    // Explicit invite list (GatherGrove users)
+  invitedExternal?: Array<{    // External invites (non-users)
+    name: string
+    phone?: string
+    email?: string
+  }>
+  
+  // ===== PHASE 3: Post-Event Capture (🚧 Planned) =====
+  photoAlbumUrl?: string       // Link to Google Photos or uploaded album
+  hostNotes?: string           // Post-event recap
+  actualAttendees?: string[]   // Who actually showed up (vs RSVPs)
+  memoryCard?: {               // Auto-generated memory card
+    dateStamp: string
+    attendeeCount: number
+    photoCollageUrl?: string
+  }
+  
+  // ===== PHASE 3: Viral Loop Tracking (🚧 Planned) =====
+  createdFrom?: "duplicate" | "new"  // Track "Host Again" usage
+  originalEventId?: string           // If duplicated from another event
+  viralMetrics?: {
+    invitesSent: number
+    rsvpsFromNonUsers: number
+    conversionsToSignup: number
+  }
 }
 ```
 
@@ -528,6 +1186,7 @@ curl -X PATCH http://127.0.0.1:8000/profile \
 
 ```typescript
 {
+  // ===== CORE FIELDS (✅ Implemented) =====
   uid: string
   email: string
   display_last_name?: string
@@ -539,8 +1198,37 @@ curl -X PATCH http://127.0.0.1:8000/profile \
   notifications_enabled: boolean
   created_at: timestamp
   updated_at: timestamp
+  
+  // ===== PHASE 2: Enhanced Profile & Connections (🚧 Planned) =====
+  householdType?: "family_with_kids" | "empty_nesters" | "singles_couples"
+  childAgeRanges?: string[]    // e.g. ["0-2", "3-5", "6-8"] NOT exact ages
+  interests?: string[]         // Tags: ["hiking", "board_games", "cooking"]
+  addressVisibility?: "exact" | "approximate" | "hidden"  // Default: approximate
+  
+  linkedHousehold?: {          // Optional household linking
+    spouseUid?: string         // Partner's account
+    childrenUids?: string[]    // Children's accounts (if they have their own)
+  }
+  
+  groupMemberships?: Array<{   // Multi-context memberships
+    groupId: string
+    groupType: "family" | "hoa" | "friend_group" | "team" | "club" | "custom"
+    role?: "member" | "admin"
+    joinedAt: timestamp
+  }>
+  
+  // ===== PHASE 3: Memory Timeline Preferences (🚧 Planned) =====
+  memoryTimelineEnabled?: boolean
+  memoryNotifications?: boolean  // "Your BBQ was 1 year ago today!"
+  premiumTier?: "free" | "premium" | "verified"
+  premiumSince?: timestamp
 }
 ```
+
+**Privacy Rules (Critical):**
+- **Kids' Privacy**: `childAgeRanges` ONLY, never store exact ages, names, or photos of minors
+- **Location Privacy**: Default to `addressVisibility: "approximate"` (~0.3mi radius)
+- **Discovery Opt-In**: Neighborhood discovery requires explicit consent
 
 #### `pushTokens` Collection
 **Document ID**: `{uid}_{token_hash}` or similar
@@ -576,7 +1264,250 @@ Located in `app/models/` and route files:
 
 ---
 
-## 🔒 Authentication & Authorization
+## �️ Feature Roadmap
+
+### **MVP (Months 1-3): The Core Loop** ✅ IN PROGRESS
+
+**Goal:** Prove the viral loop works (30% of invitees create their own event within 30 days)
+
+**Must-Have Features:**
+1. ✅ **Event Creation**
+   - 5 beautiful templates (BBQ, birthday, dinner, playdate, casual hangout)
+   - 60-second creation flow
+   - Location autocomplete + map preview
+   
+2. ✅ **Zero-Friction RSVP**
+   - Public event pages (no login required)
+   - Name + optional contact capture
+   - Social proof (show who's attending)
+   - Viral footer: "Created with GatherGrove"
+   
+3. ✅ **Smart Invitations**
+   - Copy link for SMS/WhatsApp
+   - Import phone contacts
+   - Email invites (fallback)
+   
+4. ✅ **Basic Onboarding**
+   - Google/Apple OAuth signup
+   - Optional profile (location, household type, interests)
+   - No forced fields
+   
+5. ✅ **Event Status**
+   - "Happening Now" vs. "Future" badges
+   - Push notifications for RSVPs
+   - Calendar sync (Google/iCal)
+
+**Success Metrics:**
+- 30% of invitees create their own event within 30 days
+- 50%+ RSVP rate on invitations
+- 40%+ month-over-month user growth
+
+---
+
+### **Phase 2 (Months 4-9): Neighborhood Network Effects** 🚧 PLANNED
+
+**Goal:** Unlock community discovery, prove retention
+
+**New Features:**
+1. 🚧 **Neighborhood Discovery**
+   - Map view of nearby GatherGrove users
+   - Advanced filtering (kids' ages, interests, distance)
+   - Anonymized until connection request accepted
+   
+2. 🚧 **Group Management**
+   - Create custom groups (soccer team, book club, etc.)
+   - One-tap invite entire group to events
+   - Group chat (event-specific only)
+   
+3. 🚧 **Post-Event Capture**
+   - Photo upload (direct or Google Photos link)
+   - Automatic attendee list preservation
+   - Memory card auto-generation
+   - "Host Again" button
+   
+4. 🚧 **Babysitting Feature**
+   - Nested in "Help & Favors" event category
+   - Profile opt-in checkbox
+   - Discovery filter in People tab
+   - Trust/Safety: Verified profiles (premium)
+   
+5. 🚧 **Enhanced Messaging**
+   - In-app event threads (not open DMs)
+   - "Text Host" button (opens native SMS)
+   - Push notifications for event updates
+   
+6. 🚧 **Calendar Intelligence**
+   - Import availability from Google/iCal
+   - "Find a Date" scheduling tool (Doodle-style)
+   - Suggest optimal event times
+
+**Success Metrics:**
+- 60%+ of users with 5+ neighborhood connections
+- 50%+ of events have post-event photos uploaded
+- 65%+ 6-month retention
+
+---
+
+### **Phase 3 (Months 10-18): Stickiness & Monetization** 📋 FUTURE
+
+**Goal:** Build the moat, prove revenue model
+
+**New Features:**
+1. 📋 **Memory Timeline**
+   - Free users: last 12 months
+   - Premium: unlimited access
+   - Searchable event history
+   - Anniversary reminders ("Your BBQ was 1 year ago today!")
+   - Export photo albums
+   
+2. 📋 **Premium Features** ($7.99/month or $79/year)
+   - Unlimited event history access
+   - Advanced analytics (RSVP trends, popular times)
+   - Custom branding (for power users/businesses)
+   - Priority support
+   
+3. 📋 **Discovery Delight**
+   - "Neighbor Roulette" (random intro to compatible neighbor)
+   - "Neighbor of the Week" spotlight (opt-in)
+   - Suggested meetups (AI-powered based on availability)
+   
+4. 📋 **Business Integrations**
+   - OpenTable reservations (affiliate revenue)
+   - Venmo/Cash App links (potluck reimbursements)
+   - Local venue partnerships (sponsored event suggestions)
+   
+5. 📋 **Recurring Events**
+   - Weekly playdate, monthly dinner series
+   - Auto-RSVP for regulars
+   - Attendance tracking over time
+
+**Success Metrics:**
+- 8-12% premium conversion rate
+- $8-12 LTV/CAC ratio
+- $500K+ MRR (monthly recurring revenue)
+
+---
+
+### **Phase 4 (Year 2+): Scale & Expansion** 🔮 VISION
+
+**Goal:** Become default platform for IRL gatherings
+
+**Future Features:**
+1. 🔮 **B2B White-Label** (HOAs, schools, companies pay for custom instances)
+2. 🔮 **International Expansion** (UK, Canada, Australia)
+3. 🔮 **Creator Tools** (influencers/local organizers host public events)
+4. 🔮 **AI Event Assistant** ("Plan a kid-friendly dinner for 6 families next week")
+5. 🔮 **Reputation System** (verified neighbors, trusted hosts)
+
+**Current Focus:** We're in **Phase 1** (MVP). All development effort is laser-focused on proving the viral loop works. Features outside Phase 1 scope are explicitly deferred.
+
+---
+
+## 🎯 Strategic Decisions
+
+### Decision 1: Keep "Happening Now" vs. "Future Events"?
+**Answer:** ✅ YES, but merge into single feed with status indicators
+
+**Rationale:**
+- "Happening Now" is a killer differentiator (Partiful doesn't have this)
+- But separate tabs create cognitive load
+- **Solution:** Single chronological feed with visual badges:
+  - 🔴 "Live Now" (pulsing red badge, top priority)
+  - 🟢 "This Weekend"
+  - 🔵 "Next Week"
+  - ⚪ "Future"
+
+---
+
+### Decision 2: In-App Messaging vs. SMS?
+**Answer:** ✅ HYBRID — Event-specific in-app + SMS fallback
+
+**The Model:**
+1. **For Invitations:** Always SMS/Email first (reaches non-users instantly)
+2. **For Event Coordination:** In-app messaging (keeps conversation contextualized)
+3. **For Direct Neighbor Intros:** In-app only initially (prevents spam)
+
+**Why This Works:**
+- Low friction (don't force app for basic RSVP)
+- High value (in-app messaging for event logistics is actually useful)
+- Respectful (no unsolicited neighbor texts)
+
+---
+
+### Decision 3: Individual vs. Household Sign-Up?
+**Answer:** ✅ INDIVIDUAL accounts, with optional household linking
+
+**Rationale:**
+- Household-first model was too rigid
+- Reality: Spouses have different social preferences, event interests
+- But household context is VERY useful for filtering
+
+**The Model:**
+1. Primary: Everyone signs up as individual
+2. Optional: Link to household (spouse, kids)
+3. Smart Filtering: When inviting, can choose:
+   - "Invite Sarah" (individual)
+   - "Invite Sarah's household" (includes spouse)
+   - "Invite all families with kids 4-6" (household-aware)
+
+---
+
+### Decision 4: How to Avoid "Social Media" Feel?
+**Answer:** ✅ Intentional constraints in design & features
+
+**The Design Language:**
+- **Typography:** Friendly sans-serif (like Airbnb, not corporate)
+- **Illustrations:** Hand-drawn style for empty states (less pressure than photos)
+- **Colors:** Nature-inspired palette (forest green, golden hour yellow, sky blue)
+- **Motion:** Gentle, purposeful (confetti on RSVP yes, subtle pulse on "Live Now")
+- **Copy:** Warm, human, never corporate ("Let's gather!" not "Create engagement")
+
+---
+
+### Decision 5: Neighborhood Codes (HOA/Verification)?
+**Answer:** ✅ NO forced codes, opt-in neighborhood discovery
+
+**The Flow:**
+1. **At Signup:** User provides address (for proximity, not verification)
+2. **Initial State:** Can create events, invite anyone (no restrictions)
+3. **After 2-3 Events:** Prompt appears: "Discover who else nearby uses GatherGrove"
+4. **Neighborhood Unlock:** See anonymized map, filter, send connection requests
+
+**For HOAs (Optional Premium Feature):**
+- HOA admins can create "verified neighborhoods"
+- Members get badge: "✓ Oak Ridge HOA"
+- This becomes a B2B upsell ($500-2K/year per HOA)
+
+**Why This Works:**
+- Zero friction at signup
+- Organic discovery (people opt in when ready)
+- Premium path for organized communities
+
+---
+
+### Decision 6: Kids' Privacy & Representation?
+**Answer:** ✅ Age ranges only, no names/photos of minors
+
+**The Model:**
+1. **Profile Setup:** Parents indicate kids' ages (not names)
+   - "I have kids ages: 6, 9"
+   - System converts to ranges: "Ages 5-7, 8-10"
+2. **Filtering:** Other parents can search:
+   - "Families with kids ages 4-6"
+   - Results show: "Sarah (2 kids: ages 4-6)"
+   - **NO names, photos, or identifying info of children**
+3. **Event Invitations:** Parents represent their household
+   - Event shows: "Sarah + household" or "Sarah (family of 4)"
+   - Kids attend with parents, never independently listed
+
+**Why This Matters:**
+- Protects minors from public exposure
+- Still enables core use case (finding age-appropriate playmates)
+- Complies with COPPA (Children's Online Privacy Protection Act)
+
+---
+
+## �🔒 Authentication & Authorization
 
 ### Development Mode
 
@@ -956,6 +1887,17 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 - Follow PEP 8 naming conventions
 - Type hints encouraged (but not enforced everywhere)
 
+**Strategic Constraints (Must Follow):**
+- **Events-First**: Every feature must serve event creation/attendance/memory
+- **No Social Media Patterns**: No feeds, likes, follower counts, or algorithmic sorting
+- **Privacy-First**: Opt-in everything, approximate distances, age ranges only for kids
+- **Viral by Design**: Every user-facing page should have "Created with GatherGrove" footer
+- **Time-Bound Content**: Events expire naturally (no perpetual content)
+- **North Star Test**: "Does this help people get offline and see each other?" If NO → Don't build
+
+**The One Metric That Matters:**
+All code changes should ultimately drive: **% of RSVP recipients who create their own event**
+
 **Architecture Patterns**:
 - **Routes**: Thin handlers, delegate to helper functions
 - **Models**: Pydantic for request/response validation
@@ -985,27 +1927,24 @@ When modifying functionality, check these files:
 
 ## 📝 Additional Documentation
 
+### **Strategy & Vision**
+- **[🌿 Product Strategy 2025](docs/strategy-2025.md)** - Complete strategic vision (30+ pages) *(To be created)*
+- **[🎯 The One Metric](docs/one-metric.md)** - Why 30% RSVP→Creator conversion defines success *(To be created)*
+- **[🍼 Babysitting Feature](docs/babysitting-feature.md)** - Strategic force multiplier guide *(To be created)*
+- **[🚫 What We DON'T Build](docs/anti-patterns.md)** - Avoiding "social media" drift *(To be created)*
+
+### **Technical Documentation**
 - **Firestore Schema**: See `docs/schema.md` for complete data model documentation
 - **OpenAPI Spec**: Auto-generated at `/openapi.json` or http://127.0.0.1:8000/openapi.json
 - **API Docs**: Interactive Swagger UI at `/docs`
 
-### 🚀 Extensibility & Future Architecture
-
-**NEW**: Comprehensive proposal for evolving GatherGrove into an events-first, highly extensible platform:
-
-- **[📋 Executive Summary](docs/summary.md)** - Start here! High-level overview for all stakeholders
-- **[📖 Full Proposal](docs/extensibility-proposal.md)** - Complete technical proposal with data models, migration strategy, and risk analysis (30 pages)
+### **Architecture Evolution**
+- **[📋 Executive Summary](docs/summary.md)** - Extensibility proposal overview
+- **[📖 Full Proposal](docs/extensibility-proposal.md)** - Complete technical proposal (30 pages)
 - **[🏗️ Architecture Diagrams](docs/architecture-diagram.md)** - Visual comparison of current vs. future state
-- **[✅ Phase 1 Implementation Guide](docs/phase1-implementation-checklist.md)** - Step-by-step checklist for foundation phase
-- **[🔌 API Examples](docs/api-examples-new-features.md)** - Real-world examples of new capabilities (smart targeting, AI images, public events)
-- **[🤔 Review Guide](docs/review-guide.md)** - Key questions and considerations for stakeholder review
-
-**Key Features in Proposal**:
-- 🎨 AI-generated event images (DALL-E 3)
-- 🎯 Smart invitation criteria (neighborhood + age + radius + groups + interests)
-- 🔗 Public shareable events (viral growth)
-- 👥 Flexible group system (multiple memberships: families, HOAs, clubs, etc.)
-- 📊 Explicit invitation tracking and analytics
+- **[✅ Phase 1 Implementation Guide](docs/phase1-implementation-checklist.md)** - Step-by-step checklist
+- **[🔌 API Examples](docs/api-examples-new-features.md)** - Real-world examples (smart targeting, AI images, public events)
+- **[🤔 Review Guide](docs/review-guide.md)** - Key questions for stakeholder review
 
 ---
 

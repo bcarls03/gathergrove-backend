@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.firebase import db  # real Firestore OR dev fake when SKIP_* is set
 from app.deps.auth import verify_token  # auth lives here
-from app.routes import events, households, people, push, users, groups, connections
+from app.routes import events, households, people, push, users, groups, connections, dev
 
 app = FastAPI(title="GatherGrove Backend", version="0.1.0")
 
@@ -271,6 +271,7 @@ app.include_router(events.router)
 app.include_router(households.router)
 app.include_router(people.router)
 app.include_router(connections.router)
+app.include_router(dev.router)  # ✅ Dev-only routes (seeding, testing)
 
 # ✅ IMPORTANT:
 # Frontend posts to {VITE_API_BASE_URL}/push/register

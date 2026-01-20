@@ -48,6 +48,13 @@ class _FakeDoc:
             self._coll._docs[self.id] = base
         else:
             self._coll._docs[self.id] = dict(data)
+    
+    def update(self, data: Dict[str, Any]) -> None:
+        """Update specific fields in the document"""
+        if self.id in self._coll._docs and self._coll._docs[self.id] is not None:
+            self._coll._docs[self.id].update(data)
+        else:
+            self._coll._docs[self.id] = dict(data)
 
 
 class _FakeColl:
@@ -55,9 +62,35 @@ class _FakeColl:
         self.name = name
         self._root = root
         self._docs = root.setdefault(name, {})
+        self._where_filters = []
 
     def document(self, doc_id: str) -> _FakeDoc:
         return _FakeDoc(self, doc_id)
+    
+    def where(self, field: str, op: str, value: Any):
+        """Simple where clause for filtering documents"""
+        new_coll = _FakeColl(self.name, self._root)
+        new_coll._where_filters = self._where_filters + [(field, op, value)]
+        return new_coll
+    
+    def stream(self):
+        """Stream documents matching where filters"""
+        for doc_id, doc_data in self._docs.items():
+            if doc_data is None:
+                continue
+            
+            # Apply where filters
+            matches = True
+            for field, op, value in self._where_filters:
+                doc_value = doc_data.get(field)
+                if op == "==":
+                    if doc_value != value:
+                        matches = False
+                        break
+                # Add other operators as needed
+            
+            if matches:
+                yield _FakeSnap(doc_id, doc_data)
 
 
 class _FakeDB:

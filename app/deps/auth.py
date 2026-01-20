@@ -80,3 +80,12 @@ def require_user(user: Dict[str, Any] = Depends(verify_token)) -> Dict[str, Any]
             detail="Unauthorized",
         )
     return user
+
+
+def get_current_user_uid(user: Dict[str, Any] = Depends(require_user)) -> str:
+    """
+    Convenience dependency that returns just the user's UID string.
+    Use as:
+      current_user_uid: str = Depends(get_current_user_uid)
+    """
+    return user["uid"]
