@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: gathergrove-backend
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: SKIP_FIREBASE_INIT=1 uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: SKIP_FIREBASE_INIT
+        value: "1"
+      - key: CORS_EXTRA_ORIGINS
+        value: "https://gathergrove-nine.vercel.app"
