@@ -98,12 +98,8 @@ class PublicEventView(BaseModel):
     id: str
     title: str
     details: Optional[str] = None
-    start: datetime
-    end: Optional[datetime] = None
-    location: Optional[str] = None
+    start_at: Optional[str] = Field(None, description="ISO 8601 start datetime")
+    end_at: Optional[str] = Field(None, description="ISO 8601 end datetime")
     host_name: str = Field(..., description="Display name of host (e.g., 'The Miller Family')")
     category: str
-    
-    # Capacity info (if set)
-    capacity: Optional[int] = None
-    spots_remaining: Optional[int] = None
+    visibility: str = Field(default="public")

@@ -172,12 +172,26 @@ async def create_invitations(
             # Build RSVP link
             rsvp_link = f"https://gathergrove.com/rsvp/{rsvp_token}"
             
+            # Format event datetime (handle both camelCase and snake_case)
+            start_at = event_data.get("startAt") or event_data.get("start_at")
+            event_datetime_str = "soon"
+            if start_at:
+                try:
+                    from datetime import datetime as dt
+                    if isinstance(start_at, str):
+                        event_dt = dt.fromisoformat(start_at.replace('Z', '+00:00'))
+                    else:
+                        event_dt = start_at
+                    event_datetime_str = _format_event_time(event_dt)
+                except Exception:
+                    event_datetime_str = "soon"
+            
             # Send SMS
             success, message_sid = sms_service.send_event_invitation(
                 to_number=phone_number,
                 event_title=event_data.get("title", "Event"),
                 host_name=host_name,
-                event_datetime=_format_event_time(event_data.get("start")),
+                event_datetime=event_datetime_str,
                 rsvp_link=rsvp_link
             )
             
@@ -338,17 +352,19 @@ async def get_event_by_token(rsvp_token: str) -> PublicEventView:
         ))
         spots_remaining = max(0, event_data["capacity"] - accepted_count)
     
+    # Handle both camelCase and snake_case field names
+    start_at = event_data.get("startAt") or event_data.get("start_at")
+    end_at = event_data.get("endAt") or event_data.get("end_at")
+    
     return PublicEventView(
         id=event_id,
         title=event_data.get("title", "Event"),
         details=event_data.get("details"),
-        start=event_data["start"],
-        end=event_data.get("end"),
-        location=event_data.get("neighborhood"),  # Use neighborhood as location
+        start_at=start_at,
+        end_at=end_at,
         host_name=host_name,
         category=event_data.get("category", "other"),
-        capacity=event_data.get("capacity"),
-        spots_remaining=spots_remaining
+        visibility=event_data.get("visibility", "public")
     )
 
 
