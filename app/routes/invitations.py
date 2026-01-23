@@ -291,81 +291,90 @@ async def get_event_by_token(rsvp_token: str) -> PublicEventView:
     Get event details for anonymous RSVP page.
     Returns sanitized event info (no sensitive data).
     """
-    # Find invitation by token
-    invitations_ref = db.collection("invitations")
-    
-    # Handle fake vs real Firestore
-    invitation = None
-    if hasattr(invitations_ref, "_docs"):
-        # Fake Firestore
-        for inv_data in invitations_ref._docs.values():
-            if inv_data.get("rsvp_token") == rsvp_token:
-                invitation = inv_data
-                break
-    else:
-        # Real Firestore
-        query = invitations_ref.where("rsvp_token", "==", rsvp_token).limit(1)
-        results = list(query.stream())
-        if results:
-            invitation = results[0].to_dict()
-    
-    if not invitation:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid RSVP link"
+    try:
+        # Find invitation by token
+        invitations_ref = db.collection("invitations")
+        
+        # Handle fake vs real Firestore
+        invitation = None
+        if hasattr(invitations_ref, "_docs"):
+            # Fake Firestore
+            for inv_data in invitations_ref._docs.values():
+                if inv_data.get("rsvp_token") == rsvp_token:
+                    invitation = inv_data
+                    break
+        else:
+            # Real Firestore
+            query = invitations_ref.where("rsvp_token", "==", rsvp_token).limit(1)
+            results = list(query.stream())
+            if results:
+                invitation = results[0].to_dict()
+        
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid RSVP link"
+            )
+        
+        # Get event details
+        event_id = invitation["event_id"]
+        event_ref = db.collection("events").document(event_id)
+        event_doc = event_ref.get()
+        
+        if not event_doc.exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Event not found"
+            )
+        
+        event_data = event_doc.to_dict()
+        
+        # Get host name
+        host_id = invitation["invited_by"]
+        host_household = db.collection("households").document(host_id).get()
+        host_name = "A neighbor"
+        if host_household.exists:
+            host_data = host_household.to_dict()
+            last_name = host_data.get("lastName", "")
+            adult_names = host_data.get("adultNames", [])
+            if last_name:
+                host_name = f"The {last_name} Family"
+            elif adult_names:
+                host_name = adult_names[0]
+        
+        # Handle both camelCase and snake_case field names
+        start_at = event_data.get("startAt") or event_data.get("start_at")
+        end_at = event_data.get("endAt") or event_data.get("end_at")
+        
+        # Convert datetime objects to ISO strings (fake Firestore returns datetime objects)
+        if start_at and not isinstance(start_at, str):
+            start_at = start_at.isoformat() if hasattr(start_at, 'isoformat') else str(start_at)
+        if end_at and not isinstance(end_at, str):
+            end_at = end_at.isoformat() if hasattr(end_at, 'isoformat') else str(end_at)
+        
+        return PublicEventView(
+            id=event_id,
+            title=event_data.get("title", "Event"),
+            details=event_data.get("details"),
+            start_at=start_at,
+            end_at=end_at,
+            host_name=host_name,
+            category=event_data.get("category", "other"),
+            visibility=event_data.get("visibility", "public")
         )
-    
-    # Get event details
-    event_id = invitation["event_id"]
-    event_ref = db.collection("events").document(event_id)
-    event_doc = event_ref.get()
-    
-    if not event_doc.exists:
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Log the error and return 500
+        import traceback
+        print(f"\n❌ ERROR in get_event_by_token: {type(e).__name__}: {e}")
+        print("Full traceback:")
+        traceback.print_exc()
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error: {str(e)}"
         )
-    
-    event_data = event_doc.to_dict()
-    
-    # Get host name
-    host_id = invitation["invited_by"]
-    host_household = db.collection("households").document(host_id).get()
-    host_name = "A neighbor"
-    if host_household.exists:
-        host_data = host_household.to_dict()
-        last_name = host_data.get("lastName", "")
-        adult_names = host_data.get("adultNames", [])
-        if last_name:
-            host_name = f"The {last_name} Family"
-        elif adult_names:
-            host_name = adult_names[0]
-    
-    # Calculate spots remaining (if capacity set)
-    spots_remaining = None
-    if event_data.get("capacity"):
-        accepted_count = sum(
-            1 for inv in invitations_ref._docs.values()
-            if inv.get("event_id") == event_id and inv.get("status") == "accepted"
-        ) if hasattr(invitations_ref, "_docs") else len(list(
-            invitations_ref.where("event_id", "==", event_id).where("status", "==", "accepted").stream()
-        ))
-        spots_remaining = max(0, event_data["capacity"] - accepted_count)
-    
-    # Handle both camelCase and snake_case field names
-    start_at = event_data.get("startAt") or event_data.get("start_at")
-    end_at = event_data.get("endAt") or event_data.get("end_at")
-    
-    return PublicEventView(
-        id=event_id,
-        title=event_data.get("title", "Event"),
-        details=event_data.get("details"),
-        start_at=start_at,
-        end_at=end_at,
-        host_name=host_name,
-        category=event_data.get("category", "other"),
-        visibility=event_data.get("visibility", "public")
-    )
 
 
 @router.post("/rsvp/{rsvp_token}")
