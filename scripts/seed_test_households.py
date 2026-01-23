@@ -63,6 +63,7 @@ def seed_test_households():
             },
             "latitude": 45.5155,
             "longitude": -122.6789,
+            "location_precision": "street",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -88,6 +89,7 @@ def seed_test_households():
             },
             "latitude": 45.5165,
             "longitude": -122.6799,
+            "location_precision": "zipcode",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -113,6 +115,7 @@ def seed_test_households():
             },
             "latitude": 45.5145,
             "longitude": -122.6810,
+            "location_precision": "street",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -137,6 +140,7 @@ def seed_test_households():
             },
             "latitude": 45.5135,
             "longitude": -122.6820,
+            "location_precision": "zipcode",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -161,6 +165,7 @@ def seed_test_households():
             },
             "latitude": 45.5175,
             "longitude": -122.6750,
+            "location_precision": "street",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -185,6 +190,7 @@ def seed_test_households():
             },
             "latitude": 45.5160,
             "longitude": -122.6780,
+            "location_precision": "zipcode",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -210,6 +216,7 @@ def seed_test_households():
             },
             "latitude": 45.5180,
             "longitude": -122.6760,
+            "location_precision": "street",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -232,6 +239,7 @@ def seed_test_households():
             },
             "latitude": 45.5140,
             "longitude": -122.6815,
+            "location_precision": "zipcode",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -253,6 +261,7 @@ def seed_test_households():
             },
             "latitude": 45.5170,
             "longitude": -122.6770,
+            "location_precision": "street",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -275,6 +284,7 @@ def seed_test_households():
             },
             "latitude": 45.5185,
             "longitude": -122.6755,
+            "location_precision": "zipcode",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -296,6 +306,7 @@ def seed_test_households():
             },
             "latitude": 45.5150,
             "longitude": -122.6805,
+            "location_precision": "street",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },
@@ -322,6 +333,7 @@ def seed_test_households():
             },
             "latitude": 45.5158,
             "longitude": -122.6785,
+            "location_precision": "zipcode",
             "createdAt": datetime.now(timezone.utc).isoformat(),
             "updatedAt": datetime.now(timezone.utc).isoformat()
         },

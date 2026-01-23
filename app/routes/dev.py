@@ -127,3 +127,348 @@ def clear_all_events():
         count += 1
     
     return {"message": f"Deleted {count} events"}
+
+
+@router.post("/seed-households", status_code=status.HTTP_201_CREATED)
+def seed_test_households():
+    """
+    Seed 12 diverse test households for Discovery page testing.
+    
+    DEV MODE ONLY: This endpoint only works with in-memory fake Firestore.
+    Creates households with:
+    - Different household types (families, couples, singles)
+    - Various kid ages and configurations
+    - Different neighborhoods
+    - Mix of location_precision values (street vs zipcode)
+    """
+    
+    from datetime import datetime, timezone, timedelta
+    
+    def generate_birth_date(age_years):
+        """Generate a birth date for a kid of given age"""
+        now = datetime.now(timezone.utc)
+        birth_date = now - timedelta(days=age_years * 365)
+        return {
+            "birthMonth": birth_date.month,
+            "birthYear": birth_date.year
+        }
+    
+    now = datetime.now(timezone.utc).isoformat()
+    
+    households = [
+        # ============= FAMILIES WITH KIDS =============
+        {
+            "id": "household-miller-001",
+            "uid": "user-miller-001",
+            "email": "sarah.miller@example.com",
+            "lastName": "Miller",
+            "adultNames": ["Sarah", "Mike"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(7), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+                {**generate_birth_date(4), "sex": "boy", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "456 Oak Lane",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5155,
+            "longitude": -122.6789,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-johnson-002",
+            "uid": "user-johnson-002",
+            "email": "emily.johnson@example.com",
+            "lastName": "Johnson",
+            "adultNames": ["Emily", "David"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(5), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+                {**generate_birth_date(3), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+                {**generate_birth_date(1), "sex": "boy", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "789 Maple Drive",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5165,
+            "longitude": -122.6799,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-garcia-003",
+            "uid": "user-garcia-003",
+            "email": "maria.garcia@example.com",
+            "lastName": "Garcia",
+            "adultNames": ["Maria", "Carlos"],
+            "neighborhood": "Riverside",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(10), "sex": "boy", "awayAtCollege": False, "canBabysit": True},
+                {**generate_birth_date(8), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+                {**generate_birth_date(6), "sex": "boy", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "123 River Street",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97202"
+            },
+            "latitude": 45.5145,
+            "longitude": -122.6810,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-chen-004",
+            "uid": "user-chen-004",
+            "email": "lisa.chen@example.com",
+            "lastName": "Chen",
+            "adultNames": ["Lisa", "James"],
+            "neighborhood": "Riverside",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(12), "sex": "girl", "awayAtCollege": False, "canBabysit": True},
+                {**generate_birth_date(9), "sex": "boy", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "567 Riverfront Ave",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97202"
+            },
+            "latitude": 45.5135,
+            "longitude": -122.6820,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-patel-005",
+            "uid": "user-patel-005",
+            "email": "priya.patel@example.com",
+            "lastName": "Patel",
+            "adultNames": ["Priya", "Raj"],
+            "neighborhood": "Hillside",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(6), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+                {**generate_birth_date(4), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "234 Hill Crest Road",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97203"
+            },
+            "latitude": 45.517,
+            "longitude": -122.677,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        # ============= SINGLE PARENT =============
+        {
+            "id": "household-wilson-006",
+            "uid": "user-wilson-006",
+            "email": "amanda.wilson@example.com",
+            "lastName": "Wilson",
+            "adultNames": ["Amanda"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "single_parent",
+            "kids": [
+                {**generate_birth_date(8), "sex": "boy", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "321 Cedar Street",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.516,
+            "longitude": -122.679,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        # ============= MORE FAMILIES =============
+        {
+            "id": "household-anderson-007",
+            "uid": "user-anderson-007",
+            "email": "jennifer.anderson@example.com",
+            "lastName": "Anderson",
+            "adultNames": ["Jennifer", "Robert"],
+            "neighborhood": "Hillside",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(16), "sex": "boy", "awayAtCollege": False, "canBabysit": True},
+                {**generate_birth_date(14), "sex": "girl", "awayAtCollege": False, "canBabysit": True},
+            ],
+            "address": {
+                "street": "345 Summit Drive",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97203"
+            },
+            "latitude": 45.518,
+            "longitude": -122.676,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        # ============= COUPLES =============
+        {
+            "id": "household-taylor-008",
+            "uid": "user-taylor-008",
+            "email": "jessica.taylor@example.com",
+            "lastName": "Taylor",
+            "adultNames": ["Jessica", "Brian"],
+            "neighborhood": "Riverside",
+            "householdType": "couple",
+            "kids": [],
+            "address": {
+                "street": "678 Waterfront Blvd",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97202"
+            },
+            "latitude": 45.5125,
+            "longitude": -122.683,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-martinez-009",
+            "uid": "user-martinez-009",
+            "email": "sophia.martinez@example.com",
+            "lastName": "Martinez",
+            "adultNames": ["Sophia", "Daniel"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "couple",
+            "kids": [],
+            "address": {
+                "street": "890 Park Avenue",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.517,
+            "longitude": -122.678,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        # ============= SINGLES =============
+        {
+            "id": "household-brown-010",
+            "uid": "user-brown-010",
+            "email": "michael.brown@example.com",
+            "lastName": "Brown",
+            "adultNames": ["Michael"],
+            "neighborhood": "Hillside",
+            "householdType": "single",
+            "kids": [],
+            "address": {
+                "street": "456 Peak Lane",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97203"
+            },
+            "latitude": 45.5185,
+            "longitude": -122.6755,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-lee-011",
+            "uid": "user-lee-011",
+            "email": "kevin.lee@example.com",
+            "lastName": "Lee",
+            "adultNames": ["Kevin"],
+            "neighborhood": "Riverside",
+            "householdType": "single",
+            "kids": [],
+            "address": {
+                "street": "901 Bridge Street",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97202"
+            },
+            "latitude": 45.513,
+            "longitude": -122.684,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-robinson-012",
+            "uid": "user-robinson-012",
+            "email": "ashley.robinson@example.com",
+            "lastName": "Robinson",
+            "adultNames": ["Ashley", "Chris"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "family_with_kids",
+            "kids": [
+                {**generate_birth_date(11), "sex": "boy", "awayAtCollege": False, "canBabysit": True},
+                {**generate_birth_date(9), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+                {**generate_birth_date(7), "sex": "girl", "awayAtCollege": False, "canBabysit": False},
+            ],
+            "address": {
+                "street": "567 Forest Drive",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5175,
+            "longitude": -122.6785,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+    ]
+    
+    # Save all households to Firestore
+    for household in households:
+        db.collection("households").document(household["id"]).set(household)
+    
+    # Count by type
+    type_counts = {}
+    precision_counts = {"street": 0, "zipcode": 0}
+    for h in households:
+        htype = h.get("householdType", "unknown")
+        type_counts[htype] = type_counts.get(htype, 0) + 1
+        precision = h.get("location_precision")
+        if precision in precision_counts:
+            precision_counts[precision] += 1
+    
+    return {
+        "message": f"✨ Successfully seeded {len(households)} test households!",
+        "household_types": type_counts,
+        "location_precision": precision_counts,
+        "note": "Households include mix of street-level and ZIP-only location precision for testing."
+    }

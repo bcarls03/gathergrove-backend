@@ -29,6 +29,10 @@ class UserProfile(BaseModel):
     address: Optional[str] = Field(None, description="Full address (not publicly shown)")
     lat: Optional[float] = Field(None, description="Latitude for proximity search")
     lng: Optional[float] = Field(None, description="Longitude for proximity search")
+    location_precision: Optional[Literal["street", "zipcode"]] = Field(
+        None,
+        description="Precision level of location: 'street' for full address, 'zipcode' for ZIP only"
+    )
     
     # Privacy settings
     discovery_opt_in: bool = Field(
