@@ -11,4 +11,4 @@ services:
       - key: SKIP_FIREBASE_INIT
         value: "1"
       - key: CORS_EXTRA_ORIGINS
-        value: "https://gathergrove-nine.vercel.app"
+        value: "https://gathergrove-nine.vercel.app,https://*.vercel.app"

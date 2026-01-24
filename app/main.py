@@ -34,9 +34,13 @@ if single:
 # De-dupe
 FRONTEND_ORIGINS = sorted({o for o in FRONTEND_ORIGINS if o})
 
+# Allow all Vercel preview URLs (*.vercel.app)
+allow_origin_regex = r"https://.*\.vercel\.app"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=FRONTEND_ORIGINS,
+    allow_origin_regex=allow_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
