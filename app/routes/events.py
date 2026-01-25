@@ -265,6 +265,7 @@ class EventIn(BaseModel):
     type: EventType
     title: constr(strip_whitespace=True, min_length=1)
     details: Optional[str] = None
+    location: Optional[str] = None  # ✅ NEW: Event location field
 
     start_at: Optional[datetime] = Field(
         None, validation_alias="startAt", serialization_alias="startAt"
@@ -303,6 +304,7 @@ class EventPatch(BaseModel):
 
     title: Optional[constr(strip_whitespace=True, min_length=1)] = None
     details: Optional[str] = None
+    location: Optional[str] = None  # ✅ NEW: Can update event location
 
     start_at: Optional[datetime] = Field(
         None, validation_alias="startAt", serialization_alias="startAt"
@@ -333,6 +335,13 @@ class RSVPIn(BaseModel):
     status: Literal["going", "maybe", "declined"]
 
 
+class GuestRSVPIn(BaseModel):
+    """Guest RSVP (no authentication required)"""
+    name: str = Field(..., min_length=1, max_length=100)
+    phone: Optional[str] = Field(None, max_length=20)
+    choice: Literal["going", "maybe", "cant"]
+
+
 class EventRsvpHousehold(BaseModel):
     uid: str
     household_id: str
@@ -341,6 +350,10 @@ class EventRsvpHousehold(BaseModel):
     household_type: Optional[str] = None
     child_ages: List[int] = []
     child_sexes: List[Optional[str]] = []
+    # Guest fields
+    is_guest: bool = False
+    guest_name: Optional[str] = None
+    guest_phone: Optional[str] = None
 
 
 class EventRsvpBuckets(BaseModel):
@@ -391,6 +404,7 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
         "type": body.type,
         "title": body.title.strip(),
         "details": body.details,
+        "location": body.location,  # ✅ NEW: Event location
         "startAt": start_at,
         "endAt": end_at,  # ✅ uses computed end_at
         "expiresAt": expires_at,
@@ -705,6 +719,59 @@ def leave_event(event_id: str, claims=Depends(verify_token)):
     return {"ok": True}
 
 
+@router.post("/events/{event_id}/rsvp/guest", summary="Guest RSVP (no auth required)")
+def guest_rsvp_event(event_id: str, body: GuestRSVPIn):
+    """
+    **PUBLIC ENDPOINT** - No authentication required.
+    
+    Allows anyone with the event link to RSVP as a guest.
+    Stores guest name and optional phone number.
+    """
+    ev_ref = db.collection("events").document(event_id)
+    ev_snap = ev_ref.get()
+    if not ev_snap or not ev_snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+    ev = ev_snap.to_dict() or {}
+
+    # Don't allow RSVPs on canceled events
+    st = str(ev.get("status") or "active").strip().lower()
+    if st in ("canceled", "cancelled"):
+        raise HTTPException(status_code=409, detail="Event is canceled")
+
+    now = _now()
+    
+    # Check capacity for "going" status
+    cap = ev.get("capacity")
+    if body.choice == "going" and isinstance(cap, int) and cap >= 1:
+        stats = _attendee_stats(event_id, "")  # Pass empty uid for guest
+        if stats["countGoing"] >= cap:
+            raise HTTPException(status_code=409, detail="Event is at capacity")
+
+    # Generate unique guest ID
+    guest_id = str(uuid.uuid4())
+    rid = f"{event_id}_guest_{guest_id}"
+    
+    payload = {
+        "eventId": event_id,
+        "guest_id": guest_id,
+        "guest_name": body.name.strip(),
+        "guest_phone": body.phone.strip() if body.phone else None,
+        "status": body.choice,
+        "rsvpAt": now,
+        "is_guest": True,  # Flag to identify guest RSVPs
+    }
+    
+    ref = db.collection("event_attendees").document(rid)
+    ref.set(payload, merge=True)
+
+    return {
+        "success": True,
+        "rsvp_id": rid,
+        "guest_id": guest_id,
+        "message": "RSVP received! Thank you."
+    }
+
+
 @router.get(
     "/events/{event_id}/rsvps",
     summary="Get RSVP buckets (going/maybe/can't go) with household info",
@@ -732,6 +799,32 @@ def get_event_rsvps(event_id: str, claims=Depends(verify_token)):
         if ev_key != event_id:
             continue
 
+        # Check if this is a guest RSVP
+        is_guest = rec.get("is_guest", False)
+        
+        if is_guest:
+            # Handle guest RSVP
+            guest_name = rec.get("guest_name", "Guest")
+            guest_phone = rec.get("guest_phone")
+            guest_id = rec.get("guest_id", rid)
+            
+            status_raw = str(rec.get("status") or "").strip().lower()
+            if status_raw not in ("going", "maybe", "cant"):
+                status_raw = "going"
+            bucket_key = status_raw
+            
+            buckets[bucket_key].append(
+                EventRsvpHousehold(
+                    uid=f"guest_{guest_id}",
+                    household_id=f"guest_{guest_id}",
+                    is_guest=True,
+                    guest_name=guest_name,
+                    guest_phone=guest_phone,
+                )
+            )
+            continue
+
+        # Handle authenticated user RSVP
         raw_uid = rec.get("uid")
         uid_str = str(raw_uid) if raw_uid is not None else f"anon-{rid}"
 
