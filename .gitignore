@@ -21,3 +21,11 @@ secrets/
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Additional hygiene patterns
+venv/
+*.log
+*.bak
+*.tmp
+*.old
+*~
