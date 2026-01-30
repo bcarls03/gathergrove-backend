@@ -190,3 +190,113 @@ def test_patch_validations_and_success():
     body = r.json()
     assert body["capacity"] == 10
     assert body["category"] == "neighborhood"
+
+
+# --- Public Event Endpoint Tests (Viral Loop) ------------------------------
+
+def test_public_endpoint_link_only():
+    """GET /events/public/{event_id} returns 200 for link_only visibility"""
+    # Create event with link_only visibility (default)
+    event = create_now_event("Link Only Event", visibility="link_only")
+    event_id = event["id"]
+    
+    # Public endpoint should return event (no auth required)
+    r = client.get(f"/events/public/{event_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == event_id
+    assert body["title"] == "Link Only Event"
+    assert body["visibility"] == "link_only"
+
+
+def test_public_endpoint_public_visibility():
+    """GET /events/public/{event_id} returns 200 for public visibility"""
+    event = create_now_event("Public Event", visibility="public")
+    event_id = event["id"]
+    
+    r = client.get(f"/events/public/{event_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == event_id
+    assert body["visibility"] == "public"
+
+
+def test_public_endpoint_private_returns_404():
+    """GET /events/public/{event_id} returns 404 for private events (privacy protection)"""
+    event = create_now_event("Private Event", visibility="private")
+    event_id = event["id"]
+    
+    # Public endpoint should return 404 to hide private events
+    r = client.get(f"/events/public/{event_id}")
+    assert r.status_code == 404
+    assert "not found" in r.json()["detail"].lower()
+
+
+def test_public_endpoint_nonexistent_returns_404():
+    """GET /events/public/{event_id} returns 404 for non-existent events"""
+    fake_id = "00000000000000000000000000000000"
+    
+    r = client.get(f"/events/public/{fake_id}")
+    assert r.status_code == 404
+    assert "not found" in r.json()["detail"].lower()
+
+
+def test_public_endpoint_returns_snake_case():
+    """Verify public endpoint returns snake_case field names (contract) and safe fields only"""
+    now = datetime.now(UTC)
+    future = now + timedelta(hours=2)
+    event = create_future_event(
+        "Future Event",
+        start=now,
+        end=future,
+        visibility="link_only",
+        details="Test details"
+    )
+    event_id = event["id"]
+    
+    r = client.get(f"/events/public/{event_id}")
+    assert r.status_code == 200
+    body = r.json()
+    
+    # Verify snake_case fields exist
+    assert "start_at" in body or "startAt" in body  # Accept either during transition
+    assert "end_at" in body or "endAt" in body
+    
+    # Verify security: sensitive fields NOT exposed
+    assert "host_user_id" not in body, "host_user_id should not be exposed publicly"
+    assert "neighborhoods" not in body, "neighborhoods should not be exposed publicly"
+    
+    # Verify event details
+    assert body["type"] == "future"
+    assert body["details"] == "Test details"
+    assert body["visibility"] == "link_only"
+
+
+def test_guest_rsvp_to_public_event(client):
+    """Test that unauthenticated users can RSVP as guests to link_only events."""
+    # Create a link_only event
+    event_data = {
+        "title": "Guest RSVP Test Event",
+        "details": "Testing guest RSVP flow",
+        "type": "now",
+        "category": "neighborhood",
+        "visibility": "link_only",
+    }
+    resp = client.post("/events", json=event_data, headers=auth())
+    assert resp.status_code == 200
+    event_id = resp.json()["id"]
+    
+    # Guest RSVP (no authentication)
+    guest_rsvp_data = {
+        "choice": "going",
+        "name": "Jane Neighbor",
+        "phone": "555-1234"
+    }
+    rsvp_resp = client.post(f"/events/{event_id}/rsvp/guest", json=guest_rsvp_data)
+    assert rsvp_resp.status_code == 200
+    
+    rsvp_body = rsvp_resp.json()
+    assert rsvp_body["success"] is True
+    assert "guest_id" in rsvp_body
+    assert "rsvp_id" in rsvp_body
+    assert rsvp_body["message"] == "RSVP received! Thank you."

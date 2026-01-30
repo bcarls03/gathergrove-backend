@@ -287,9 +287,11 @@ class EventIn(BaseModel):
         description='One of: "neighborhood", "playdate", "help", "pet", "food", "celebrations", "sports", "other"',
     )
     
-    # ✅ NEW: Visibility for viral loop (default: public)
+    # Visibility control for viral loop
+    # DEFAULT: private (secure by default)
+    # Frontend explicitly sets link_only for shareable events
     visibility: Optional[Literal["private", "link_only", "public"]] = Field(
-        default="public",
+        default="private",
         description="Who can see this event? private=host only, link_only=anyone with link, public=discovery"
     )
 
@@ -339,7 +341,7 @@ class GuestRSVPIn(BaseModel):
     """Guest RSVP (no authentication required)"""
     name: str = Field(..., min_length=1, max_length=100)
     phone: Optional[str] = Field(None, max_length=20)
-    choice: Literal["going", "maybe", "cant"]
+    choice: Literal["going", "maybe", "declined"]
 
 
 class EventRsvpHousehold(BaseModel):
@@ -393,7 +395,7 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 
     # Generate shareable link for link_only or public events
     event_id = uuid.uuid4().hex
-    visibility = body.visibility  # Will use default 'public' from model
+    visibility = body.visibility  # Will use default 'private' from model (frontend sets link_only explicitly)
     shareable_link = None
     if visibility in ('link_only', 'public'):
         # Use full UUID for cryptographic security (128 bits entropy)
@@ -541,6 +543,48 @@ def list_events(
         next_token = _encode_token(last_start, last["id"])
 
     return {"items": _jsonify(page), "nextPageToken": next_token}
+
+
+@router.get("/events/public/{event_id}", summary="Get public event by ID (no auth required)")
+def get_public_event(event_id: str = Path(...)):
+    """
+    Public endpoint for shareable event links (/e/{event_id}).
+    Returns event details for public and link_only visibility events.
+    No authentication required.
+    
+    Security: Only returns safe public fields (no neighborhoods, internal IDs).
+    """
+    ref = db.collection("events").document(event_id)
+    snap = ref.get()
+    if not snap or not snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    data = snap.to_dict() or {}
+    
+    # Only return public or link_only events
+    visibility = data.get("visibility", "private")
+    if visibility not in ("public", "link_only"):
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Whitelist safe public fields only
+    # DO NOT expose: neighborhoods (private IDs), host_user_id (Firebase UID), internal metadata
+    public_data = {
+        "id": snap.id,
+        "type": data.get("type"),
+        "title": data.get("title"),
+        "details": data.get("details"),
+        "location": data.get("location"),
+        "start_at": data.get("startAt"),  # Backend stores as startAt
+        "end_at": data.get("endAt"),
+        "expires_at": data.get("expiresAt"),
+        "capacity": data.get("capacity"),
+        "category": data.get("category"),
+        "visibility": visibility,
+        "status": data.get("status"),
+        "created_at": data.get("createdAt"),
+    }
+    
+    return _jsonify(public_data)
 
 
 @router.get("/events/{event_id}", summary="Get an event by ID")

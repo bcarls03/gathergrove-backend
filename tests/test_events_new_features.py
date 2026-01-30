@@ -71,7 +71,7 @@ def test_create_event_with_default_visibility(client, set_claims):
     
     assert response.status_code == 200
     data = response.json()
-    assert data["visibility"] == "public"  # Default
+    assert data["visibility"] == "private"  # Default (secure by default)
 
 
 def test_create_event_with_public_visibility_generates_link(client, set_claims):
