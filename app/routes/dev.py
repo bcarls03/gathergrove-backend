@@ -130,16 +130,20 @@ def clear_all_events():
 
 
 @router.post("/seed-households", status_code=status.HTTP_201_CREATED)
-def seed_test_households():
+def seed_test_households(count: int = 20):
     """
-    Seed 12 diverse test households for Discovery page testing.
+    Seed diverse test households for Discovery page testing.
     
     DEV MODE ONLY: This endpoint only works with in-memory fake Firestore.
-    Creates households with:
-    - Different household types (families, couples, singles)
-    - Various kid ages and configurations
-    - Different neighborhoods
-    - Mix of location_precision values (street vs zipcode)
+    Creates 20 households with:
+    - 6x Family w/ Kids (varying kid counts + ages)
+    - 4x Singles / Couples
+    - 8x Empty Nesters (includes 5 additional empty nester households)
+    - 2x Mixed location_precision (street vs zipcode)
+    - Each household has a unique dev UID (not tied to current user)
+    
+    Args:
+        count: Number of households to seed (default: 20)
     """
     
     from datetime import datetime, timezone, timedelta
@@ -159,7 +163,7 @@ def seed_test_households():
         # ============= FAMILIES WITH KIDS =============
         {
             "id": "household-miller-001",
-            "uid": "user-miller-001",
+            "uid": "dev-seed-001",
             "email": "sarah.miller@example.com",
             "lastName": "Miller",
             "adultNames": ["Sarah", "Mike"],
@@ -184,7 +188,7 @@ def seed_test_households():
         
         {
             "id": "household-johnson-002",
-            "uid": "user-johnson-002",
+            "uid": "dev-seed-002",
             "email": "emily.johnson@example.com",
             "lastName": "Johnson",
             "adultNames": ["Emily", "David"],
@@ -210,7 +214,7 @@ def seed_test_households():
         
         {
             "id": "household-garcia-003",
-            "uid": "user-garcia-003",
+            "uid": "dev-seed-garcia-003",
             "email": "maria.garcia@example.com",
             "lastName": "Garcia",
             "adultNames": ["Maria", "Carlos"],
@@ -236,7 +240,7 @@ def seed_test_households():
         
         {
             "id": "household-chen-004",
-            "uid": "user-chen-004",
+            "uid": "dev-seed-chen-004",
             "email": "lisa.chen@example.com",
             "lastName": "Chen",
             "adultNames": ["Lisa", "James"],
@@ -261,7 +265,7 @@ def seed_test_households():
         
         {
             "id": "household-patel-005",
-            "uid": "user-patel-005",
+            "uid": "dev-seed-patel-005",
             "email": "priya.patel@example.com",
             "lastName": "Patel",
             "adultNames": ["Priya", "Raj"],
@@ -287,7 +291,7 @@ def seed_test_households():
         # ============= SINGLE PARENT =============
         {
             "id": "household-wilson-006",
-            "uid": "user-wilson-006",
+            "uid": "dev-seed-wilson-006",
             "email": "amanda.wilson@example.com",
             "lastName": "Wilson",
             "adultNames": ["Amanda"],
@@ -312,7 +316,7 @@ def seed_test_households():
         # ============= MORE FAMILIES =============
         {
             "id": "household-anderson-007",
-            "uid": "user-anderson-007",
+            "uid": "dev-seed-anderson-007",
             "email": "jennifer.anderson@example.com",
             "lastName": "Anderson",
             "adultNames": ["Jennifer", "Robert"],
@@ -338,7 +342,7 @@ def seed_test_households():
         # ============= COUPLES =============
         {
             "id": "household-taylor-008",
-            "uid": "user-taylor-008",
+            "uid": "dev-seed-taylor-008",
             "email": "jessica.taylor@example.com",
             "lastName": "Taylor",
             "adultNames": ["Jessica", "Brian"],
@@ -360,7 +364,7 @@ def seed_test_households():
         
         {
             "id": "household-martinez-009",
-            "uid": "user-martinez-009",
+            "uid": "dev-seed-martinez-009",
             "email": "sophia.martinez@example.com",
             "lastName": "Martinez",
             "adultNames": ["Sophia", "Daniel"],
@@ -383,7 +387,7 @@ def seed_test_households():
         # ============= SINGLES =============
         {
             "id": "household-brown-010",
-            "uid": "user-brown-010",
+            "uid": "dev-seed-brown-010",
             "email": "michael.brown@example.com",
             "lastName": "Brown",
             "adultNames": ["Michael"],
@@ -405,7 +409,7 @@ def seed_test_households():
         
         {
             "id": "household-lee-011",
-            "uid": "user-lee-011",
+            "uid": "dev-seed-lee-011",
             "email": "kevin.lee@example.com",
             "lastName": "Lee",
             "adultNames": ["Kevin"],
@@ -427,7 +431,7 @@ def seed_test_households():
         
         {
             "id": "household-robinson-012",
-            "uid": "user-robinson-012",
+            "uid": "dev-seed-robinson-012",
             "email": "ashley.robinson@example.com",
             "lastName": "Robinson",
             "adultNames": ["Ashley", "Chris"],
@@ -450,6 +454,176 @@ def seed_test_households():
             "createdAt": now,
             "updatedAt": now
         },
+        
+        # ============= EMPTY NESTERS =============
+        {
+            "id": "household-davis-013",
+            "uid": "dev-seed-013",
+            "email": "robert.davis@example.com",
+            "lastName": "Davis",
+            "adultNames": ["Robert", "Linda"],
+            "neighborhood": "Hillside",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "789 Vista Point",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97203"
+            },
+            "latitude": 45.519,
+            "longitude": -122.675,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-thompson-014",
+            "uid": "dev-seed-014",
+            "email": "margaret.thompson@example.com",
+            "lastName": "Thompson",
+            "adultNames": ["Margaret", "William"],
+            "neighborhood": "Riverside",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "234 Shore Lane",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97202"
+            },
+            "latitude": 45.512,
+            "longitude": -122.685,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-white-015",
+            "uid": "dev-seed-015",
+            "email": "susan.white@example.com",
+            "lastName": "White",
+            "adultNames": ["Susan", "Richard"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "890 Heights Boulevard",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5168,
+            "longitude": -122.6792,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        # ============= ADDITIONAL EMPTY NESTERS (016-020) =============
+        {
+            "id": "household-mitchell-016",
+            "uid": "dev-seed-016",
+            "email": "patricia.mitchell@example.com",
+            "lastName": "Mitchell",
+            "adultNames": ["Patricia", "Robert"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "112 Maple Drive",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5172,
+            "longitude": -122.6785,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-campbell-017",
+            "uid": "dev-seed-017",
+            "email": "linda.campbell@example.com",
+            "lastName": "Campbell",
+            "adultNames": ["Linda", "Thomas"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "334 Birch Lane",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5145,
+            "longitude": -122.6798,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-roberts-018",
+            "uid": "dev-seed-018",
+            "email": "nancy.roberts@example.com",
+            "lastName": "Roberts",
+            "adultNames": ["Nancy", "Charles"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "567 Cedar Court",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5158,
+            "longitude": -122.6775,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-turner-019",
+            "uid": "dev-seed-019",
+            "email": "barbara.turner@example.com",
+            "lastName": "Turner",
+            "adultNames": ["Barbara", "Daniel"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "789 Willow Way",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5163,
+            "longitude": -122.6802,
+            "location_precision": "street",
+            "createdAt": now,
+            "updatedAt": now
+        },
+        
+        {
+            "id": "household-phillips-020",
+            "uid": "dev-seed-020",
+            "email": "karen.phillips@example.com",
+            "lastName": "Phillips",
+            "adultNames": ["Karen", "Matthew"],
+            "neighborhood": "Oak Ridge",
+            "householdType": "empty_nesters",
+            "address": {
+                "street": "901 Elm Street",
+                "city": "Portland",
+                "state": "OR",
+                "zip": "97201"
+            },
+            "latitude": 45.5151,
+            "longitude": -122.6788,
+            "location_precision": "zipcode",
+            "createdAt": now,
+            "updatedAt": now
+        },
     ]
     
     # Save all households to Firestore
@@ -467,8 +641,10 @@ def seed_test_households():
             precision_counts[precision] += 1
     
     return {
-        "message": f"✨ Successfully seeded {len(households)} test households!",
+        "message": f"✨ Successfully seeded {len(households)} test households (dev-seed-001 through dev-seed-020)!",
+        "count": len(households),
         "household_types": type_counts,
         "location_precision": precision_counts,
-        "note": "Households include mix of street-level and ZIP-only location precision for testing."
+        "neighborhoods": list({h["neighborhood"] for h in households}),
+        "note": "Each household has unique dev UID. Includes families w/ kids, singles, couples, empty nesters (8 total), and mixed location precision."
     }
