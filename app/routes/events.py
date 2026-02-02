@@ -287,9 +287,7 @@ class EventIn(BaseModel):
         description='One of: "neighborhood", "playdate", "help", "pet", "food", "celebrations", "sports", "other"',
     )
     
-    # Visibility control for viral loop
-    # DEFAULT: private (secure by default)
-    # Frontend explicitly sets link_only for shareable events
+    # ✅ NEW: Visibility for viral loop (default: private)
     visibility: Optional[Literal["private", "link_only", "public"]] = Field(
         default="private",
         description="Who can see this event? private=host only, link_only=anyone with link, public=discovery"
@@ -395,7 +393,7 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 
     # Generate shareable link for link_only or public events
     event_id = uuid.uuid4().hex
-    visibility = body.visibility  # Will use default 'private' from model (frontend sets link_only explicitly)
+    visibility = body.visibility  # Will use default 'public' from model
     shareable_link = None
     if visibility in ('link_only', 'public'):
         # Use full UUID for cryptographic security (128 bits entropy)
@@ -545,48 +543,6 @@ def list_events(
     return {"items": _jsonify(page), "nextPageToken": next_token}
 
 
-@router.get("/events/public/{event_id}", summary="Get public event by ID (no auth required)")
-def get_public_event(event_id: str = Path(...)):
-    """
-    Public endpoint for shareable event links (/e/{event_id}).
-    Returns event details for public and link_only visibility events.
-    No authentication required.
-    
-    Security: Only returns safe public fields (no neighborhoods, internal IDs).
-    """
-    ref = db.collection("events").document(event_id)
-    snap = ref.get()
-    if not snap or not snap.exists:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    data = snap.to_dict() or {}
-    
-    # Only return public or link_only events
-    visibility = data.get("visibility", "private")
-    if visibility not in ("public", "link_only"):
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Whitelist safe public fields only
-    # DO NOT expose: neighborhoods (private IDs), host_user_id (Firebase UID), internal metadata
-    public_data = {
-        "id": snap.id,
-        "type": data.get("type"),
-        "title": data.get("title"),
-        "details": data.get("details"),
-        "location": data.get("location"),
-        "start_at": data.get("startAt"),  # Backend stores as startAt
-        "end_at": data.get("endAt"),
-        "expires_at": data.get("expiresAt"),
-        "capacity": data.get("capacity"),
-        "category": data.get("category"),
-        "visibility": visibility,
-        "status": data.get("status"),
-        "created_at": data.get("createdAt"),
-    }
-    
-    return _jsonify(public_data)
-
-
 @router.get("/events/{event_id}", summary="Get an event by ID")
 def get_event(event_id: str = Path(...), claims=Depends(verify_token)):
     ref = db.collection("events").document(event_id)
@@ -596,6 +552,42 @@ def get_event(event_id: str = Path(...), claims=Depends(verify_token)):
     data = snap.to_dict() or {}
     data["id"] = snap.id
     return _jsonify(data)
+
+
+@router.get("/events/public/{event_id}", summary="Get public event details (no auth required)")
+def get_public_event(event_id: str = Path(...)):
+    """
+    **PUBLIC ENDPOINT** - No authentication required.
+    
+    Returns sanitized event details for public RSVP/sharing.
+    Does not expose sensitive data like host_user_id or neighborhoods.
+    """
+    ref = db.collection("events").document(event_id)
+    snap = ref.get()
+    if not snap or not snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    data = snap.to_dict() or {}
+    
+    # Visibility gating: only public and link_only events can be accessed
+    visibility = data.get("visibility", "private")
+    if visibility not in ["public", "link_only"]:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Return only public-safe fields
+    public_data = {
+        "id": snap.id,
+        "title": data.get("title"),
+        "details": data.get("details"),
+        "start_at": data.get("startAt"),
+        "end_at": data.get("endAt"),
+        "category": data.get("category"),
+        "visibility": data.get("visibility"),
+        "type": data.get("type") or ("future" if data.get("startAt") else "now"),
+        "status": data.get("status", "active"),
+    }
+    
+    return _jsonify(public_data)
 
 
 @router.patch("/events/{event_id}", summary="Edit an event (host-only)")
