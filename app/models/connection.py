@@ -6,14 +6,27 @@ and see each other's activity. They follow the "earned trust" principle:
 - Either household can initiate a connection request
 - The other household must accept before connection is established
 - Either household can remove the connection at any time
+
+STATE MACHINE:
+- STRANGER: No connection exists
+- REQUEST_SENT: Current household sent pending request
+- REQUEST_RECEIVED: Current household received pending request
+- CONNECTED: Connection accepted (mutual)
+- EXPIRED: Request expired after 30 days (silent)
+
+RULES:
+- Messaging allowed only when CONNECTED
+- Event invitations allowed regardless of state
+- Requests are single-use (cannot resend while pending)
+- Requests auto-expire 30 days after requested_at
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ConnectionStatus = Literal["pending", "accepted", "declined"]
+ConnectionStatus = Literal["pending", "accepted", "declined", "expired"]
 
 
 class Connection(BaseModel):
@@ -37,11 +50,15 @@ class Connection(BaseModel):
     )
     status: ConnectionStatus = Field(
         default="pending",
-        description="Connection status: pending (awaiting acceptance), accepted, or declined"
+        description="Connection status: pending, accepted, declined, or expired"
     )
     requested_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="When the connection was requested (UTC)"
+    )
+    expires_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc) + timedelta(days=30),
+        description="When pending request expires (UTC, 30 days from requested_at)"
     )
     responded_at: Optional[datetime] = Field(
         None,
@@ -56,6 +73,12 @@ class Connection(BaseModel):
         description="Last updated timestamp (UTC)"
     )
     
+    def is_expired(self) -> bool:
+        """Check if this pending request has expired (30 days passed)"""
+        if self.status != "pending":
+            return False
+        return datetime.now(timezone.utc) > self.expires_at
+    
     class Config:
         json_schema_extra = {
             "example": {
@@ -64,6 +87,7 @@ class Connection(BaseModel):
                 "to_household_id": "household_456",
                 "status": "accepted",
                 "requested_at": "2026-01-19T10:00:00Z",
+                "expires_at": "2026-02-18T10:00:00Z",
                 "responded_at": "2026-01-19T12:00:00Z",
                 "created_at": "2026-01-19T10:00:00Z",
                 "updated_at": "2026-01-19T12:00:00Z"

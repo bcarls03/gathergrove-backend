@@ -64,7 +64,18 @@ class _FakeColl:
         self._docs = root.setdefault(name, {})
         self._where_filters = []
 
-    def document(self, doc_id: str) -> _FakeDoc:
+    def document(self, doc_id: Optional[str] = None) -> _FakeDoc:
+        """Get or create a document reference.
+        
+        If doc_id is None, generates a unique ID (mimics Firestore auto-ID behavior).
+        
+        Usage:
+            ref = coll.document()           # Auto-generated ID
+            ref = coll.document("my-id")    # Explicit ID
+        """
+        if doc_id is None:
+            import uuid
+            doc_id = uuid.uuid4().hex
         return _FakeDoc(self, doc_id)
     
     def where(self, field: str, op: str, value: Any):

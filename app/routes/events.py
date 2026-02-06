@@ -543,31 +543,6 @@ def list_events(
     return {"items": _jsonify(page), "nextPageToken": next_token}
 
 
-@router.get("/events/public/{event_id}", summary="Get public event (no auth required)")
-def get_public_event(event_id: str = Path(...)):
-    """
-    Public endpoint for shared event links (e.g., /e/{event_id} in frontend).
-    No authentication required, but only returns events with visibility 'link_only' or 'public'.
-    Returns snake_case fields for frontend compatibility.
-    """
-    ref = db.collection("events").document(event_id)
-    snap = ref.get()
-    
-    if not snap or not snap.exists:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    data = snap.to_dict() or {}
-    visibility = data.get("visibility", "private")
-    
-    # Security: Only expose link_only or public events via this endpoint
-    if visibility not in ("link_only", "public"):
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Return snake_case fields (frontend adapter expects this)
-    data["id"] = snap.id
-    return _jsonify(data)
-
-
 @router.get("/events/{event_id}", summary="Get an event by ID")
 def get_event(event_id: str = Path(...), claims=Depends(verify_token)):
     ref = db.collection("events").document(event_id)

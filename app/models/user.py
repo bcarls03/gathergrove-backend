@@ -2,7 +2,15 @@
 User profile model - Individual-first identity.
 
 Every person gets their own UserProfile (separate from households).
-Households are optional groups that users can link to.
+Households are optional gro    # Privacy settings
+    discovery_opt_in: bool
+    visibility: str
+    
+    # Household link
+    household_id: Optional[str] = None
+    
+    # Interests
+    interests: Optional[list[str]] = Noneusers can link to.
 """
 
 from datetime import datetime, timezone

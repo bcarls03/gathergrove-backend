@@ -1,7 +1,7 @@
 # app/routes/connections.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Body
@@ -45,17 +45,27 @@ def _list_docs(coll):
 
 
 def _get_user_household_id(uid: str) -> Optional[str]:
-    """Get the household ID for a user from the users collection"""
+    """Get the household ID for a user from the users collection.
+    
+    Checks both householdId (new, camelCase) and household_id (old, snake_case)
+    for backwards compatibility.
+    """
     try:
         user_ref = db.collection("users").document(uid)
         if hasattr(user_ref, "get"):  # real Firestore
             user_doc = user_ref.get()
             if user_doc.exists:
-                return user_doc.to_dict().get("householdId")
+                user_data = user_doc.to_dict()
+                # Prefer new camelCase field, fallback to old snake_case
+                household_id = user_data.get("householdId") or user_data.get("household_id")
+                return household_id
         elif hasattr(user_ref, "_doc"):  # dev fake
-            return user_ref._doc.get("householdId")
+            # Prefer new camelCase field, fallback to old snake_case
+            household_id = user_ref._doc.get("householdId") or user_ref._doc.get("household_id")
+            return household_id
     except Exception as e:
         print(f"Error getting household ID for user {uid}: {e}")
+    
     return None
 
 
@@ -107,6 +117,15 @@ def list_connections(
         from_hh = doc.get("from_household_id")
         to_hh = doc.get("to_household_id")
         conn_status = doc.get("status", "pending")
+        
+        # Soft expiration: if pending and past expires_at, treat as expired
+        if conn_status == "pending":
+            expires_at = doc.get("expires_at")
+            if expires_at:
+                if isinstance(expires_at, str):
+                    expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                if datetime.now(timezone.utc) > expires_at:
+                    conn_status = "expired"
         
         # Filter by status if provided
         if status and conn_status != status:
@@ -212,11 +231,13 @@ def create_connection(
     
     # Create new connection
     now = _now_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
     connection_data = {
         "from_household_id": from_household_id,
         "to_household_id": to_household_id,
         "status": "pending",
         "requested_at": now,
+        "expires_at": expires_at,
         "responded_at": None,
         "created_at": now,
         "updated_at": now,
@@ -357,4 +378,104 @@ def delete_connection(
         "id": connection_id,
         "message": "Connection removed successfully",
         "deleted": True
+    }
+
+
+@router.get("/api/connections/state/{household_id}", summary="Get connection state")
+def get_connection_state(
+    household_id: str,
+    claims=Depends(verify_token),
+) -> Dict[str, Any]:
+    """
+    Get connection state between current user's household and target household.
+    
+    Returns:
+        state: STRANGER | REQUEST_SENT | REQUEST_RECEIVED | CONNECTED | EXPIRED
+        canSendMessage: bool (only true when CONNECTED)
+        canSendRequest: bool (only true when STRANGER or EXPIRED)
+        canInviteToEvent: bool (always true for visible households)
+    """
+    uid = claims.get("uid")
+    if not uid:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Get user's household ID
+    user_household_id = _get_user_household_id(uid)
+    if not user_household_id:
+        raise HTTPException(
+            status_code=400,
+            detail="User does not have a household. Complete onboarding first."
+        )
+    
+    # Prevent self-connection
+    if user_household_id == household_id:
+        return {
+            "state": "STRANGER",
+            "canSendMessage": False,
+            "canSendRequest": False,
+            "canInviteToEvent": True,
+        }
+    
+    # Find connection between households
+    coll = db.collection("connections")
+    state = "STRANGER"
+    
+    for conn_id, doc in _list_docs(coll):
+        if not doc:
+            continue
+        
+        from_hh = doc.get("from_household_id")
+        to_hh = doc.get("to_household_id")
+        
+        # Check if this connection involves both households
+        is_match = (
+            (from_hh == user_household_id and to_hh == household_id) or
+            (from_hh == household_id and to_hh == user_household_id)
+        )
+        
+        if not is_match:
+            continue
+        
+        # Found connection
+        conn_status = doc.get("status", "pending")
+        
+        if conn_status == "accepted":
+            state = "CONNECTED"
+            break
+        
+        if conn_status == "pending":
+            # Check expiration
+            expires_at = doc.get("expires_at")
+            if expires_at:
+                if isinstance(expires_at, str):
+                    expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                if datetime.now(timezone.utc) > expires_at:
+                    state = "EXPIRED"
+                    break
+            
+            # Determine direction
+            if from_hh == user_household_id:
+                state = "REQUEST_SENT"
+            else:
+                state = "REQUEST_RECEIVED"
+            break
+        
+        if conn_status == "expired":
+            state = "EXPIRED"
+            break
+        
+        if conn_status == "declined":
+            state = "STRANGER"
+            break
+    
+    # Calculate permissions based on state
+    can_send_message = (state == "CONNECTED")
+    can_send_request = (state in ["STRANGER", "EXPIRED"])
+    can_invite_to_event = True  # Always allowed for visible households
+    
+    return {
+        "state": state,
+        "canSendMessage": can_send_message,
+        "canSendRequest": can_send_request,
+        "canInviteToEvent": can_invite_to_event,
     }

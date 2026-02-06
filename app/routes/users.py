@@ -142,7 +142,7 @@ def signup_user(
     return _jsonify(profile_data)
 
 
-@router.get("/me", response_model=UserProfileOut)
+@router.get("/me")
 def get_my_profile(claims=Depends(verify_token)):
     """
     Get the current user's profile.
@@ -157,6 +157,18 @@ def get_my_profile(claims=Depends(verify_token)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User profile not found. Please complete signup first."
         )
+    
+    # Normalize household field: prefer householdId (new), fallback to household_id (old)
+    household_id_value = None
+    if "householdId" in profile:
+        household_id_value = profile["householdId"]
+    elif "household_id" in profile:
+        household_id_value = profile["household_id"]
+    
+    # Ensure both fields are present for compatibility
+    if household_id_value:
+        profile["householdId"] = household_id_value
+        profile["household_id"] = household_id_value
     
     return _jsonify(profile)
 
@@ -302,7 +314,7 @@ def create_household(
             "lng": None,
             "discovery_opt_in": True,
             "visibility": "neighbors",
-            "household_id": None,
+            "householdId": None,  # ✅ Use camelCase to match connections.py
             "interests": None,
             "created_at": now,
             "updated_at": now,
@@ -312,10 +324,11 @@ def create_household(
         print(f"ℹ️  Auto-created user profile for {uid} (dev mode convenience)")
     
     # Check if user is already in a household
-    if profile.get("household_id"):
+    if profile.get("householdId") or profile.get("household_id"):  # Check both for backwards compat
+        existing_hh = profile.get("householdId") or profile.get("household_id")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"User is already linked to household {profile['household_id']}. Unlink first."
+            detail=f"User is already linked to household {existing_hh}. Unlink first."
         )
     
     # Create new household
@@ -339,13 +352,13 @@ def create_household(
     # Update user profile to link to household (use set with merge)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "household_id": household_id,
+        "householdId": household_id,  # ✅ Use camelCase to match connections.py
         "updated_at": now
     }, merge=True)
     
     # DEBUG: Verify the household_id was actually saved
     updated_profile = user_ref.get().to_dict()
-    print(f"🔍 DEBUG: After household creation, user profile household_id = {updated_profile.get('household_id')}")
+    print(f"✅ After household creation: uid={uid}, householdId={updated_profile.get('householdId')}")
     
     return _jsonify(household_data)
 
@@ -376,10 +389,11 @@ def link_to_household(
         )
     
     # Check if user is already in a household
-    if profile.get("household_id"):
+    if profile.get("householdId") or profile.get("household_id"):  # Check both for backwards compat
+        existing_hh = profile.get("householdId") or profile.get("household_id")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"User is already linked to household {profile['household_id']}. Unlink first."
+            detail=f"User is already linked to household {existing_hh}. Unlink first."
         )
     
     # Check if household exists
@@ -405,7 +419,7 @@ def link_to_household(
     # Update user profile to link to household (use set with merge)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "household_id": body.household_id,
+        "householdId": body.household_id,  # ✅ Use camelCase to match connections.py
         "updated_at": now
     }, merge=True)
     
@@ -432,7 +446,7 @@ def unlink_from_household(claims=Depends(verify_token)):
             detail="User profile not found"
         )
     
-    household_id = profile.get("household_id")
+    household_id = profile.get("householdId") or profile.get("household_id")  # Check both for backwards compat
     if not household_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -456,7 +470,7 @@ def unlink_from_household(claims=Depends(verify_token)):
     # Update user profile to unlink from household (use set with merge)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "household_id": None,
+        "householdId": None,  # ✅ Use camelCase to match connections.py
         "updated_at": now
     }, merge=True)
     
