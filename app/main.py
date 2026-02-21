@@ -38,8 +38,8 @@ if single:
 # De-dupe
 FRONTEND_ORIGINS = sorted({o for o in FRONTEND_ORIGINS if o})
 
-# Allow all Vercel preview URLs (*.vercel.app)
-allow_origin_regex = r"https://.*\.vercel\.app"
+# Allow localhost/127.0.0.1 on any port + Vercel preview URLs
+allow_origin_regex = r"^(http://(localhost|127\.0\.0\.1)(:\d+)?|https://.*\.vercel\.app)$"
 
 app.add_middleware(
     CORSMiddleware,
