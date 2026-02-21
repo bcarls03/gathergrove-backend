@@ -138,6 +138,27 @@ class UserSignupRequest(BaseModel):
         }
 
 
+class IntentKid(BaseModel):
+    """
+    Kid metadata stored on person (user) record.
+    Section 30: Person-owned intent kids (no names, no photos).
+    """
+    birthYear: int = Field(..., description="Birth year (e.g., 2018)")
+    birthMonth: Optional[int] = Field(None, ge=1, le=12, description="Birth month (1-12, optional)")
+    gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = Field(None, description="Gender (optional)")
+    awayAtCollege: bool = Field(False, description="Lives away from home (college, work, etc.)")
+    canBabysit: bool = Field(False, description="Can help with babysitting / parent helper")
+
+
+class UserIntent(BaseModel):
+    """
+    Person-level intent fields (Section 30).
+    Stored on user record under 'intent' field.
+    """
+    household_type: Optional[Literal["family_with_kids", "empty_nesters", "singles_couples"]] = None
+    kids: Optional[list[IntentKid]] = None
+
+
 class UserProfileOut(BaseModel):
     """
     Model for user profile responses (what clients receive).

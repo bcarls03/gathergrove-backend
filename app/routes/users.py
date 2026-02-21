@@ -29,7 +29,9 @@ from app.models.user import (
     UserProfile,
     UserProfileUpdate,
     UserSignupRequest,
-    UserProfileOut
+    UserProfileOut,
+    UserIntent,
+    IntentKid
 )
 from app.models.household import (
     Household,
@@ -273,6 +275,80 @@ def update_my_profile(
     updates["updated_at"] = _now()
     
     # Update in Firestore (use set with merge for fake DB compatibility)
+    ref = db.collection("users").document(uid)
+    ref.set(updates, merge=True)
+    
+    # Get updated profile
+    updated_profile = _get_user_profile(uid)
+    return _jsonify(updated_profile)
+
+
+@router.patch("/me/intent", response_model=UserProfileOut)
+def update_my_intent(
+    body: UserIntent,
+    claims=Depends(verify_token)
+):
+    """
+    Update current user's intent fields (Section 30: person-owned intent).
+    
+    Accepts household_type and/or kids array.
+    - If omitted, existing values are preserved (permissive).
+    - If provided, replaces the entire intent.kids array.
+    
+    This allows saving kids metadata even if user has no household yet.
+    """
+    uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
+    
+    # Check if user exists
+    profile = _get_user_profile(uid)
+    if not profile:
+        # DEV MODE: Auto-create user
+        now = _now()
+        profile = {
+            "uid": uid,
+            "email": email,
+            "first_name": "",
+            "last_name": "",
+            "profile_photo_url": None,
+            "bio": None,
+            "address": None,
+            "lat": None,
+            "lng": None,
+            "discovery_opt_in": True,
+            "visibility": "neighbors",
+            "household_id": None,
+            "interests": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        ref = db.collection("users").document(uid)
+        ref.set(profile)
+        print(f"ℹ️  Auto-created user profile for {uid} (dev mode convenience)")
+    
+    # Build intent update
+    intent_data: Dict[str, Any] = {}
+    
+    if body.household_type is not None:
+        intent_data["household_type"] = body.household_type
+    
+    if body.kids is not None:
+        # Convert Pydantic models to dicts
+        intent_data["kids"] = [k.model_dump() for k in body.kids]
+    
+    if not intent_data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No intent fields provided to update"
+        )
+    
+    # Merge intent into existing profile
+    updates = {
+        "intent": intent_data,
+        "updated_at": _now(),
+    }
+    
+    # Update in Firestore
     ref = db.collection("users").document(uid)
     ref.set(updates, merge=True)
     
