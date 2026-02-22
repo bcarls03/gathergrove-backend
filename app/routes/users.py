@@ -335,11 +335,6 @@ def create_household(
     household_id = f"household_{uuid.uuid4().hex[:12]}"
     now = _now()
     
-    # DEBUG: Log kids data received
-    if body.kids:
-        for i, kid in enumerate(body.kids):
-            print(f"KID_AGE_YEARS_DEBUG: Received kid[{i}] with age_years={kid.age_years}, age_range={kid.age_range}")
-    
     household_data = {
         "id": household_id,
         "name": body.name,
@@ -500,13 +495,34 @@ def get_my_household(claims=Depends(verify_token)):
             detail="User profile not found"
         )
     
-    # Check both field names for backward compatibility:
-    # - householdId (camelCase) is saved by /me/household/create
-    # - household_id (snake_case) may exist in older profiles
+    # Check both camelCase and snake_case for backward compatibility
     household_id = profile.get("householdId") or profile.get("household_id")
     print(f"🔍 DEBUG: get_my_household - User {uid} has household_id={household_id}")
     
     if not household_id:
+        # Fallback: Search for household where user is a member
+        # This handles edge cases where household was created but link wasn't saved
+        print(f"DEBUG: get_my_household - No household_id on profile for {uid}, searching by member_uids")
+        households_ref = db.collection("households")
+        query = households_ref.where("member_uids", "array_contains", uid).limit(1)
+        results = list(query.stream())
+        
+        if results:
+            household_data = results[0].to_dict()
+            household_id = results[0].id
+            household_data["id"] = household_id
+            print(f"✅ Found household via member_uids: {household_id}")
+            
+            # Backfill household_id on user profile for future reads
+            user_ref = db.collection("users").document(uid)
+            user_ref.set({
+                "householdId": household_id,
+                "updated_at": _now()
+            }, merge=True)
+            print(f"✅ Backfilled householdId on user {uid}")
+            
+            return _jsonify(household_data)
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not linked to any household"
@@ -520,21 +536,6 @@ def get_my_household(claims=Depends(verify_token)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Household {household_id} not found"
         )
-    
-    # Backward compatibility: compute age_years from age_range if missing
-    if household.get("kids"):
-        age_range_to_midpoint = {
-            "0-2": 1,
-            "3-5": 4,
-            "6-8": 7,
-            "9-12": 10,
-            "13-17": 15,
-            "18+": 18,
-        }
-        for kid in household["kids"]:
-            if not kid.get("age_years") and kid.get("age_range"):
-                kid["age_years"] = age_range_to_midpoint.get(kid["age_range"], 5)
-                print(f"KID_AGE_YEARS_DEBUG: Computed age_years={kid['age_years']} from age_range={kid['age_range']}")
     
     return _jsonify(household)
 
