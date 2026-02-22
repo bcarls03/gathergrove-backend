@@ -14,9 +14,13 @@ class Kid(BaseModel):
     """
     Child information (age range only, no names for privacy).
     """
-    age_range: Literal["0-2", "3-5", "6-8", "9-12", "13-17", "18+"] = Field(
-        ...,
-        description="Child's age range (never exact age for privacy)"
+    age_years: Optional[int] = Field(
+        None,
+        description="Child's exact age in years (canonical field)"
+    )
+    age_range: Optional[Literal["0-2", "3-5", "6-8", "9-12", "13-17", "18+"]] = Field(
+        None,
+        description="Child's age range (backward compatibility fallback)"
     )
     gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = Field(
         None,

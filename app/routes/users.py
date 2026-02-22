@@ -335,6 +335,11 @@ def create_household(
     household_id = f"household_{uuid.uuid4().hex[:12]}"
     now = _now()
     
+    # DEBUG: Log kids data received
+    if body.kids:
+        for i, kid in enumerate(body.kids):
+            print(f"KID_AGE_YEARS_DEBUG: Received kid[{i}] with age_years={kid.age_years}, age_range={kid.age_range}")
+    
     household_data = {
         "id": household_id,
         "name": body.name,
@@ -515,6 +520,21 @@ def get_my_household(claims=Depends(verify_token)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Household {household_id} not found"
         )
+    
+    # Backward compatibility: compute age_years from age_range if missing
+    if household.get("kids"):
+        age_range_to_midpoint = {
+            "0-2": 1,
+            "3-5": 4,
+            "6-8": 7,
+            "9-12": 10,
+            "13-17": 15,
+            "18+": 18,
+        }
+        for kid in household["kids"]:
+            if not kid.get("age_years") and kid.get("age_range"):
+                kid["age_years"] = age_range_to_midpoint.get(kid["age_range"], 5)
+                print(f"KID_AGE_YEARS_DEBUG: Computed age_years={kid['age_years']} from age_range={kid['age_range']}")
     
     return _jsonify(household)
 
