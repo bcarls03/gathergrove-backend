@@ -287,9 +287,9 @@ class EventIn(BaseModel):
         description='One of: "neighborhood", "playdate", "help", "pet", "food", "celebrations", "sports", "other"',
     )
     
-    # ✅ NEW: Visibility for viral loop (default: public)
+    # ✅ NEW: Visibility for viral loop (default: None, will be set to "private" in create)
     visibility: Optional[Literal["private", "link_only", "public"]] = Field(
-        default="public",
+        default=None,
         description="Who can see this event? private=host only, link_only=anyone with link, public=discovery"
     )
 
@@ -393,7 +393,8 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 
     # Generate shareable link for link_only or public events
     event_id = uuid.uuid4().hex
-    visibility = body.visibility  # Will use default 'public' from model
+    # ✅ SECURITY: Default to "private" if not specified (secure by default)
+    visibility = body.visibility if body.visibility is not None else "private"
     shareable_link = None
     if visibility in ('link_only', 'public'):
         # Use full UUID for cryptographic security (128 bits entropy)
@@ -554,6 +555,51 @@ def get_event(event_id: str = Path(...), claims=Depends(verify_token)):
     return _jsonify(data)
 
 
+@router.get("/events/public/{event_id}", summary="Get public/link_only event (no auth)")
+def get_public_event(event_id: str = Path(...)):
+    """
+    Public endpoint for viral loop: allows anyone to view link_only or public events.
+    Returns 404 for private events or non-existent events (privacy protection).
+    Returns snake_case keys and SAFE fields only (no host_user_id, neighborhoods).
+    """
+    ref = db.collection("events").document(event_id)
+    snap = ref.get()
+    if not snap or not snap.exists:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    data = snap.to_dict() or {}
+    visibility = data.get("visibility", "private")
+    
+    # Only allow public or link_only events to be viewed
+    if visibility not in ("public", "link_only"):
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Return safe fields only in snake_case
+    safe_data = {
+        "id": snap.id,
+        "type": data.get("type"),
+        "title": data.get("title"),
+        "details": data.get("details"),
+        "location": data.get("location"),
+        "visibility": visibility,
+        "category": data.get("category"),
+        "capacity": data.get("capacity"),
+        "status": data.get("status"),
+    }
+    
+    # Normalize timestamp fields to snake_case
+    if "startAt" in data:
+        safe_data["start_at"] = data["startAt"]
+    if "endAt" in data:
+        safe_data["end_at"] = data["endAt"]
+    if "expiresAt" in data:
+        safe_data["expires_at"] = data["expiresAt"]
+    if "createdAt" in data:
+        safe_data["created_at"] = data["createdAt"]
+    
+    return _jsonify(safe_data)
+
+
 @router.patch("/events/{event_id}", summary="Edit an event (host-only)")
 def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
     ref = db.collection("events").document(event_id)
@@ -584,6 +630,19 @@ def patch_event(event_id: str, body: EventPatch, claims=Depends(verify_token)):
         updates["startAt"] = _aware(body.start_at)
     if body.end_at is not None:
         updates["endAt"] = _aware(body.end_at)
+    
+    # ✅ VALIDATION: Ensure endAt > startAt (422 if violated)
+    # Compute final startAt and endAt after patches
+    final_start_at = updates.get("startAt") or current.get("startAt")
+    final_end_at = updates.get("endAt") or current.get("endAt")
+    if final_end_at is not None and final_start_at is not None:
+        # Both are aware datetimes at this point
+        if final_end_at <= final_start_at:
+            raise HTTPException(
+                status_code=422,
+                detail="endAt must be strictly greater than startAt"
+            )
+    
     if body.expires_at is not None:
         updates["expiresAt"] = _aware(body.expires_at)
     if body.capacity is not None:

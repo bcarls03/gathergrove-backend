@@ -173,6 +173,407 @@ def get_my_profile(claims=Depends(verify_token)):
     return _jsonify(profile)
 
 
+@router.post("")
+@router.post("/", include_in_schema=False)
+def create_or_update_user(
+    body: dict,
+    claims=Depends(verify_token)
+):
+    """
+    POST /users - Create or update user (compatibility endpoint).
+    
+    This endpoint provides backward compatibility with legacy tests.
+    It creates a user if they don't exist, or updates if they do.
+    
+    Non-admin users cannot set isAdmin=true (it's ignored).
+    """
+    uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
+    is_admin = claims.get("admin", False)
+    
+    # Get existing profile or create minimal one
+    profile = _get_user_profile(uid)
+    now = _now()
+    
+    if not profile:
+        # Create new profile
+        profile = {
+            "uid": uid,
+            "email": email,
+            "name": body.get("name", ""),
+            "isAdmin": body.get("isAdmin", False) if is_admin else False,
+            "favorites": [],
+            "createdAt": now,
+            "updatedAt": now,
+        }
+    else:
+        # Update existing
+        if "name" in body:
+            profile["name"] = body["name"]
+        if "isAdmin" in body and is_admin:
+            # Only admins can set isAdmin
+            profile["isAdmin"] = body["isAdmin"]
+        profile["updatedAt"] = now
+    
+    # Save to Firestore
+    ref = db.collection("users").document(uid)
+    ref.set(profile, merge=True)
+    
+    # Return raw dict (not using response model for compatibility)
+    return profile
+
+
+@router.get("/me/favorites")
+def get_my_favorites(claims=Depends(verify_token)):
+    """
+    GET /users/me/favorites - List favorited households.
+    
+    Returns paginated list of favorited households with normalized shape.
+    """
+    uid = claims["uid"]
+    
+    # Get user profile
+    profile = _get_user_profile(uid)
+    if not profile:
+        # Create minimal profile if missing
+        profile = {
+            "uid": uid,
+            "email": claims.get("email", f"{uid}@example.com"),
+            "favorites": [],
+        }
+        ref = db.collection("users").document(uid)
+        ref.set(profile, merge=True)
+    
+    fav_ids = profile.get("favorites", [])
+    if not fav_ids:
+        return {"items": [], "nextPageToken": None}
+    
+    # Fetch household details
+    items = []
+    for hid in fav_ids:
+        household_ref = db.collection("households").document(hid)
+        household_snap = household_ref.get()
+        
+        if not household_snap or not (hasattr(household_snap, "exists") and household_snap.exists):
+            continue
+        
+        h = household_snap.to_dict() or {}
+        
+        # Extract child ages
+        child_ages = []
+        if "childAges" in h:
+            child_ages = h["childAges"]
+        elif "kids" in h and isinstance(h["kids"], list):
+            for kid in h["kids"]:
+                if isinstance(kid, dict) and "age_years" in kid:
+                    child_ages.append(kid["age_years"])
+        
+        items.append({
+            "id": hid,
+            "lastName": h.get("lastName", ""),
+            "type": h.get("type") or h.get("householdType") or h.get("kind", ""),
+            "neighborhood": h.get("neighborhood") or h.get("neighborhoodCode", ""),
+            "childAges": child_ages,
+        })
+    
+    return {"items": items, "nextPageToken": None}
+
+
+# Pydantic models for PATCH validation with extra='forbid'
+class UserPatchModel(BaseModel):
+    """Model for PATCH /users/me and PATCH /users/{uid}"""
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    isAdmin: Optional[bool] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    bio: Optional[str] = None
+    discovery_opt_in: Optional[bool] = None
+    visibility: Optional[str] = None
+    
+    class Config:
+        extra = 'forbid'  # Reject unknown fields with 422
+
+
+@router.patch("/me")
+def patch_my_profile(
+    body: UserPatchModel,
+    claims=Depends(verify_token)
+):
+    """
+    PATCH /users/me - Update current user's profile.
+    
+    Validates fields and rejects unknown fields (422).
+    Empty body returns 400.
+    """
+    uid = claims["uid"]
+    is_admin = claims.get("admin", False)
+    
+    # Check if user exists
+    profile = _get_user_profile(uid)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User profile not found"
+        )
+    
+    # Get update dict (only non-None fields)
+    updates = body.dict(exclude_none=True)
+    
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields provided to update"
+        )
+    
+    # Non-admin cannot set isAdmin
+    if "isAdmin" in updates and not is_admin:
+        del updates["isAdmin"]
+    
+    # Add timestamp
+    updates["updatedAt"] = _now()
+    
+    # Update in Firestore
+    ref = db.collection("users").document(uid)
+    ref.set(updates, merge=True)
+    
+    # Get updated profile
+    updated_profile = _get_user_profile(uid)
+    return updated_profile
+
+
+@router.get("/{uid}")
+def get_user_by_id(
+    uid: str,
+    claims=Depends(verify_token)
+):
+    """
+    GET /users/{uid} - Get user by ID.
+    
+    Owner can get self (200).
+    Non-admin cannot get another user (403).
+    Admin can get anyone (200).
+    """
+    current_uid = claims["uid"]
+    is_admin = claims.get("admin", False)
+    
+    # Check permissions
+    if uid != current_uid and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden"
+        )
+    
+    # Get user profile
+    profile = _get_user_profile(uid)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return profile
+
+
+@router.patch("/{uid}")
+def patch_user_by_id(
+    uid: str,
+    body: UserPatchModel,
+    claims=Depends(verify_token)
+):
+    """
+    PATCH /users/{uid} - Update user by ID.
+    
+    Owner can patch self (200).
+    Non-admin patching another user (403).
+    Admin can patch anyone (200).
+    Empty body returns 400.
+    Unknown fields return 422 (via extra='forbid').
+    """
+    current_uid = claims["uid"]
+    is_admin = claims.get("admin", False)
+    
+    # Check permissions
+    if uid != current_uid and not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden"
+        )
+    
+    # Check if user exists
+    profile = _get_user_profile(uid)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    # Get update dict (only non-None fields)
+    updates = body.dict(exclude_none=True)
+    
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields provided to update"
+        )
+    
+    # Non-admin cannot set isAdmin
+    if "isAdmin" in updates and not is_admin:
+        del updates["isAdmin"]
+    
+    # Add timestamp
+    updates["updatedAt"] = _now()
+    
+    # Update in Firestore
+    ref = db.collection("users").document(uid)
+    ref.set(updates, merge=True)
+    
+    # Get updated profile
+    updated_profile = _get_user_profile(uid)
+    return updated_profile
+
+
+@router.get("")
+@router.get("/", include_in_schema=False)
+def admin_list_users(
+    claims=Depends(verify_token),
+    page_size: int = Query(default=50, ge=1, le=200),
+    page_token: Optional[str] = Query(default=None)
+):
+    """
+    GET /users - Admin list users with pagination.
+    
+    Only admin allowed (403 for non-admin).
+    Supports page_size query parameter.
+    """
+    is_admin = claims.get("admin", False)
+    
+    if not is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden"
+        )
+    
+    # Get all user IDs
+    coll = db.collection("users")
+    ids = []
+    
+    # Handle both real Firestore and fake DB
+    if hasattr(coll, "stream"):  # Real Firestore
+        for doc in coll.stream():
+            ids.append(doc.id)
+    elif hasattr(coll, "_docs"):  # Fake DB
+        ids = list(coll._docs.keys())
+    
+    # Sort IDs for consistent pagination
+    ids.sort()
+    
+    # Simple pagination
+    start_idx = 0
+    if page_token:
+        try:
+            start_idx = ids.index(page_token) + 1
+        except ValueError:
+            start_idx = 0
+    
+    # Get page
+    page_ids = ids[start_idx:start_idx + page_size]
+    next_token = page_ids[-1] if len(page_ids) == page_size and start_idx + page_size < len(ids) else None
+    
+    # Fetch user data
+    items = []
+    for uid in page_ids:
+        profile = _get_user_profile(uid)
+        if profile:
+            # Ensure "id" field exists for tests
+            if "id" not in profile:
+                profile["id"] = uid
+            items.append(profile)
+    
+    return {"items": items, "nextPageToken": next_token}
+
+
+@router.post("/me/favorites/{household_id}")
+def add_favorite(
+    household_id: str,
+    claims=Depends(verify_token)
+):
+    """
+    POST /users/me/favorites/{household_id} - Add household to favorites.
+    
+    Idempotent operation.
+    """
+    uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
+    
+    # Ensure user exists
+    profile = _get_user_profile(uid)
+    if not profile:
+        profile = {
+            "uid": uid,
+            "email": email,
+            "favorites": [],
+        }
+        ref = db.collection("users").document(uid)
+        ref.set(profile, merge=True)
+    
+    # Check if household exists
+    household_ref = db.collection("households").document(household_id)
+    household_snap = household_ref.get()
+    if not household_snap or not (hasattr(household_snap, "exists") and household_snap.exists):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Household not found"
+        )
+    
+    # Add to favorites (idempotent)
+    favs = set(profile.get("favorites", []))
+    if household_id not in favs:
+        favs.add(household_id)
+        ref = db.collection("users").document(uid)
+        ref.set({
+            "favorites": list(sorted(favs)),
+            "updatedAt": _now()
+        }, merge=True)
+    
+    # Return updated favorites list
+    updated_profile = _get_user_profile(uid)
+    return {"ok": True, "favorites": updated_profile.get("favorites", [])}
+
+
+@router.delete("/me/favorites/{household_id}")
+def remove_favorite(
+    household_id: str,
+    claims=Depends(verify_token)
+):
+    """
+    DELETE /users/me/favorites/{household_id} - Remove household from favorites.
+    
+    Idempotent operation.
+    """
+    uid = claims["uid"]
+    
+    # Get user profile
+    profile = _get_user_profile(uid)
+    if not profile:
+        # No profile = nothing to remove
+        return {"ok": True, "favorites": []}
+    
+    # Remove from favorites (idempotent)
+    favs = set(profile.get("favorites", []))
+    if household_id in favs:
+        favs.remove(household_id)
+        ref = db.collection("users").document(uid)
+        ref.set({
+            "favorites": list(sorted(favs)),
+            "updatedAt": _now()
+        }, merge=True)
+    
+    # Return updated favorites list
+    updated_profile = _get_user_profile(uid)
+    return {"ok": True, "favorites": updated_profile.get("favorites", [])}
+
+
 @router.get("/profiles", response_model=list[UserProfileOut])
 def get_user_profiles(
     uids: str = Query(..., description="Comma-separated list of user IDs"),
@@ -259,6 +660,8 @@ def update_my_profile(
     if body.visibility is not None:
         updates["visibility"] = body.visibility
     if body.household_id is not None:
+        # Write BOTH fields for compatibility
+        updates["householdId"] = body.household_id
         updates["household_id"] = body.household_id
     if body.interests is not None:
         updates["interests"] = body.interests
@@ -335,11 +738,6 @@ def create_household(
     household_id = f"household_{uuid.uuid4().hex[:12]}"
     now = _now()
     
-    # DEBUG: Log kids data received
-    if body.kids:
-        for i, kid in enumerate(body.kids):
-            print(f"KID_AGE_YEARS_DEBUG: Received kid[{i}] with age_years={kid.age_years}, age_range={kid.age_range}")
-    
     household_data = {
         "id": household_id,
         "name": body.name,
@@ -355,15 +753,17 @@ def create_household(
     household_ref.set(household_data)
     
     # Update user profile to link to household (use set with merge)
+    # Write BOTH fields for compatibility: householdId (camelCase) and household_id (snake_case)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "householdId": household_id,  # ✅ Use camelCase to match connections.py
+        "householdId": household_id,
+        "household_id": household_id,
         "updated_at": now
     }, merge=True)
     
     # DEBUG: Verify the household_id was actually saved
     updated_profile = user_ref.get().to_dict()
-    print(f"✅ After household creation: uid={uid}, householdId={updated_profile.get('householdId')}")
+    print(f"✅ After household creation: uid={uid}, householdId={updated_profile.get('householdId')}, household_id={updated_profile.get('household_id')}")
     
     return _jsonify(household_data)
 
@@ -422,9 +822,11 @@ def link_to_household(
         }, merge=True)
     
     # Update user profile to link to household (use set with merge)
+    # Write BOTH fields for compatibility: householdId (camelCase) and household_id (snake_case)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "householdId": body.household_id,  # ✅ Use camelCase to match connections.py
+        "householdId": body.household_id,
+        "household_id": body.household_id,
         "updated_at": now
     }, merge=True)
     
@@ -473,9 +875,11 @@ def unlink_from_household(claims=Depends(verify_token)):
             }, merge=True)
     
     # Update user profile to unlink from household (use set with merge)
+    # Clear BOTH fields for compatibility
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "householdId": None,  # ✅ Use camelCase to match connections.py
+        "householdId": None,
+        "household_id": None,
         "updated_at": now
     }, merge=True)
     
@@ -500,13 +904,36 @@ def get_my_household(claims=Depends(verify_token)):
             detail="User profile not found"
         )
     
-    # Check both field names for backward compatibility:
-    # - householdId (camelCase) is saved by /me/household/create
-    # - household_id (snake_case) may exist in older profiles
+    # Check both camelCase and snake_case for backward compatibility
     household_id = profile.get("householdId") or profile.get("household_id")
     print(f"🔍 DEBUG: get_my_household - User {uid} has household_id={household_id}")
     
     if not household_id:
+        # Fallback: Search for household where user is a member
+        # This handles edge cases where household was created but link wasn't saved
+        print(f"DEBUG: get_my_household - No household_id on profile for {uid}, searching by member_uids")
+        households_ref = db.collection("households")
+        query = households_ref.where("member_uids", "array_contains", uid)
+        results = list(query.stream())
+        
+        if results:
+            # Take first result (don't use .limit() as fake Firestore doesn't support it)
+            household_data = results[0].to_dict()
+            household_id = results[0].id
+            household_data["id"] = household_id
+            print(f"✅ Found household via member_uids: {household_id}")
+            
+            # Backfill BOTH fields on user profile for future reads
+            user_ref = db.collection("users").document(uid)
+            user_ref.set({
+                "householdId": household_id,
+                "household_id": household_id,
+                "updated_at": _now()
+            }, merge=True)
+            print(f"✅ Backfilled householdId and household_id on user {uid}")
+            
+            return _jsonify(household_data)
+        
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User is not linked to any household"
@@ -520,21 +947,6 @@ def get_my_household(claims=Depends(verify_token)):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Household {household_id} not found"
         )
-    
-    # Backward compatibility: compute age_years from age_range if missing
-    if household.get("kids"):
-        age_range_to_midpoint = {
-            "0-2": 1,
-            "3-5": 4,
-            "6-8": 7,
-            "9-12": 10,
-            "13-17": 15,
-            "18+": 18,
-        }
-        for kid in household["kids"]:
-            if not kid.get("age_years") and kid.get("age_range"):
-                kid["age_years"] = age_range_to_midpoint.get(kid["age_range"], 5)
-                print(f"KID_AGE_YEARS_DEBUG: Computed age_years={kid['age_years']} from age_range={kid['age_range']}")
     
     return _jsonify(household)
 
