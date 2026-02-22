@@ -48,6 +48,7 @@ def list_households(
     neighborhood: Optional[str] = Query(None, description="Neighborhood name"),
     household_type: Optional[str] = Query(
         None,
+        alias="type",
         description="Filter against either legacy 'type' OR newer 'householdType' (any string).",
     ),
     claims=Depends(verify_token),
@@ -58,10 +59,26 @@ def list_households(
     Notes:
     - Older docs may use field 'type' (family/emptyNest/singleCouple).
     - Newer docs / frontend typically use field 'householdType' (e.g., 'Family w/ Kids').
-    We support filtering against either.
+    We support filtering against either and normalize output to legacy 'type'.
     """
     coll = db.collection("households")
     items: List[Dict[str, Any]] = []
+
+    def normalize_household_type(doc_type: Optional[str], doc_household_type: Optional[str]) -> str:
+        """Normalize householdType to legacy type format for filtering and output."""
+        # If legacy type exists, use it directly
+        if doc_type:
+            return doc_type
+        # Otherwise, map newer householdType to legacy format
+        if doc_household_type:
+            ht_lower = doc_household_type.lower().replace(" ", "").replace("/", "")
+            if "single" in ht_lower or "couple" in ht_lower:
+                return "singleCouple"
+            elif "family" in ht_lower or "kid" in ht_lower:
+                return "family"
+            elif "empty" in ht_lower or "nest" in ht_lower:
+                return "emptyNest"
+        return "other"
 
     for hid, doc in _list_docs(coll):
         if not doc:
@@ -74,12 +91,18 @@ def list_households(
         if neighborhood and doc_neighborhood != neighborhood:
             continue
 
+        # Normalize to legacy type for filtering
+        normalized_type = normalize_household_type(doc_type, doc_household_type)
+        
         if household_type:
-            if (doc_type != household_type) and (doc_household_type != household_type):
+            if normalized_type != household_type:
                 continue
 
         row: Dict[str, Any] = dict(doc)
         row["id"] = hid
+        
+        # Always set 'type' field in output to normalized value
+        row["type"] = normalized_type
 
         # Ensure adultNames always present as a list
         adult_names = row.get("adultNames")
