@@ -259,6 +259,8 @@ def update_my_profile(
     if body.visibility is not None:
         updates["visibility"] = body.visibility
     if body.household_id is not None:
+        # Write BOTH fields for compatibility
+        updates["householdId"] = body.household_id
         updates["household_id"] = body.household_id
     if body.interests is not None:
         updates["interests"] = body.interests
@@ -350,15 +352,17 @@ def create_household(
     household_ref.set(household_data)
     
     # Update user profile to link to household (use set with merge)
+    # Write BOTH fields for compatibility: householdId (camelCase) and household_id (snake_case)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "householdId": household_id,  # ✅ Use camelCase to match connections.py
+        "householdId": household_id,
+        "household_id": household_id,
         "updated_at": now
     }, merge=True)
     
     # DEBUG: Verify the household_id was actually saved
     updated_profile = user_ref.get().to_dict()
-    print(f"✅ After household creation: uid={uid}, householdId={updated_profile.get('householdId')}")
+    print(f"✅ After household creation: uid={uid}, householdId={updated_profile.get('householdId')}, household_id={updated_profile.get('household_id')}")
     
     return _jsonify(household_data)
 
@@ -417,9 +421,11 @@ def link_to_household(
         }, merge=True)
     
     # Update user profile to link to household (use set with merge)
+    # Write BOTH fields for compatibility: householdId (camelCase) and household_id (snake_case)
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "householdId": body.household_id,  # ✅ Use camelCase to match connections.py
+        "householdId": body.household_id,
+        "household_id": body.household_id,
         "updated_at": now
     }, merge=True)
     
@@ -468,9 +474,11 @@ def unlink_from_household(claims=Depends(verify_token)):
             }, merge=True)
     
     # Update user profile to unlink from household (use set with merge)
+    # Clear BOTH fields for compatibility
     user_ref = db.collection("users").document(uid)
     user_ref.set({
-        "householdId": None,  # ✅ Use camelCase to match connections.py
+        "householdId": None,
+        "household_id": None,
         "updated_at": now
     }, merge=True)
     
@@ -504,22 +512,24 @@ def get_my_household(claims=Depends(verify_token)):
         # This handles edge cases where household was created but link wasn't saved
         print(f"DEBUG: get_my_household - No household_id on profile for {uid}, searching by member_uids")
         households_ref = db.collection("households")
-        query = households_ref.where("member_uids", "array_contains", uid).limit(1)
+        query = households_ref.where("member_uids", "array_contains", uid)
         results = list(query.stream())
         
         if results:
+            # Take first result (don't use .limit() as fake Firestore doesn't support it)
             household_data = results[0].to_dict()
             household_id = results[0].id
             household_data["id"] = household_id
             print(f"✅ Found household via member_uids: {household_id}")
             
-            # Backfill household_id on user profile for future reads
+            # Backfill BOTH fields on user profile for future reads
             user_ref = db.collection("users").document(uid)
             user_ref.set({
                 "householdId": household_id,
+                "household_id": household_id,
                 "updated_at": _now()
             }, merge=True)
-            print(f"✅ Backfilled householdId on user {uid}")
+            print(f"✅ Backfilled householdId and household_id on user {uid}")
             
             return _jsonify(household_data)
         
