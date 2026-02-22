@@ -282,6 +282,7 @@ app.include_router(people.router)
 app.include_router(connections.router)
 app.include_router(threads.router)  # NEW: Messaging threads
 app.include_router(dev.router)  # ✅ Dev-only routes (seeding, testing)
+app.include_router(dev.legacy_router)  # ✅ Legacy /_dev prefix for backward compatibility
 
 # ✅ IMPORTANT:
 # Frontend posts to {VITE_API_BASE_URL}/push/register

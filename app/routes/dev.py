@@ -648,3 +648,44 @@ def seed_test_households(count: int = 20):
         "neighborhoods": list({h["neighborhood"] for h in households}),
         "note": "Each household has unique dev UID. Includes families w/ kids, singles, couples, empty nesters (8 total), and mixed location precision."
     }
+
+
+def _seed_household(household_id: str):
+    """
+    Shared logic to seed a single test household.
+    Used by both /dev and /_dev routes for backward compatibility.
+    """
+    household = {
+        "id": household_id,
+        "lastName": "TestFamily",
+        "type": "family",
+        "householdType": "family_with_kids",
+        "neighborhood": "test-neighborhood",
+        "childAges": [5, 8],
+        "kids": [
+            {"age_years": 5, "age_range": "3-5", "gender": "male"},
+            {"age_years": 8, "age_range": "6-8", "gender": "female"}
+        ],
+        "member_uids": [],
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat()
+    }
+    db.collection("households").document(household_id).set(household)
+    return {"ok": True, "household_id": household_id}
+
+
+@router.post("/seed/household/{household_id}")
+def seed_household_dev(household_id: str):
+    """Seed a single test household (dev mode only)"""
+    return _seed_household(household_id)
+
+
+# Legacy router for backward compatibility with /_dev prefix
+legacy_router = APIRouter(prefix="/_dev", tags=["dev"])
+
+
+@legacy_router.post("/seed/household/{household_id}")
+def seed_household_legacy(household_id: str):
+    """Seed a single test household (legacy /_dev prefix)"""
+    return _seed_household(household_id)
+
