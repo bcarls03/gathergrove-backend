@@ -495,7 +495,10 @@ def get_my_household(claims=Depends(verify_token)):
             detail="User profile not found"
         )
     
-    household_id = profile.get("household_id")
+    # Check both field names for backward compatibility:
+    # - householdId (camelCase) is saved by /me/household/create
+    # - household_id (snake_case) may exist in older profiles
+    household_id = profile.get("householdId") or profile.get("household_id")
     print(f"🔍 DEBUG: get_my_household - User {uid} has household_id={household_id}")
     
     if not household_id:
