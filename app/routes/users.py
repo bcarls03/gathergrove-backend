@@ -148,15 +148,37 @@ def get_my_profile(claims=Depends(verify_token)):
     Get the current user's profile.
     
     Returns the authenticated user's profile data.
+    
+    DEV MODE: Auto-creates user if they don't exist (for testing convenience)
     """
     uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
     
     profile = _get_user_profile(uid)
     if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found. Please complete signup first."
-        )
+        # DEV MODE: Auto-create user instead of returning 404
+        # This handles cases where in-memory Firestore was cleared or first-time access
+        now = _now()
+        profile = {
+            "uid": uid,
+            "email": email,
+            "first_name": "",
+            "last_name": "",
+            "profile_photo_url": None,
+            "bio": None,
+            "address": None,
+            "lat": None,
+            "lng": None,
+            "discovery_opt_in": True,
+            "visibility": "neighbors",
+            "household_id": None,
+            "interests": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        ref = db.collection("users").document(uid)
+        ref.set(profile)
+        print(f"ℹ️  Auto-created user profile for {uid} on GET /users/me (dev mode convenience)")
     
     # Normalize household field: prefer householdId (new), fallback to household_id (old)
     household_id_value = None
