@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -149,36 +150,44 @@ def get_my_profile(claims=Depends(verify_token)):
     
     Returns the authenticated user's profile data.
     
-    DEV MODE: Auto-creates user if they don't exist (for testing convenience)
+    DEV MODE (GG_DEV_AUTOCREATE_USER=1): Auto-creates user if they don't exist (for testing convenience)
     """
     uid = claims["uid"]
     email = claims.get("email", f"{uid}@example.com")
     
     profile = _get_user_profile(uid)
     if not profile:
-        # DEV MODE: Auto-create user instead of returning 404
-        # This handles cases where in-memory Firestore was cleared or first-time access
-        now = _now()
-        profile = {
-            "uid": uid,
-            "email": email,
-            "first_name": "",
-            "last_name": "",
-            "profile_photo_url": None,
-            "bio": None,
-            "address": None,
-            "lat": None,
-            "lng": None,
-            "discovery_opt_in": True,
-            "visibility": "neighbors",
-            "household_id": None,
-            "interests": None,
-            "created_at": now,
-            "updated_at": now,
-        }
-        ref = db.collection("users").document(uid)
-        ref.set(profile)
-        print(f"ℹ️  Auto-created user profile for {uid} on GET /users/me (dev mode convenience)")
+        # DEV MODE ONLY: Auto-create user instead of returning 404
+        # Only enabled when GG_DEV_AUTOCREATE_USER=1 (explicit local dev opt-in)
+        # CI, tests, and production will return 404 as expected (default OFF)
+        if os.getenv("GG_DEV_AUTOCREATE_USER") == "1":
+            now = _now()
+            profile = {
+                "uid": uid,
+                "email": email,
+                "first_name": "",
+                "last_name": "",
+                "profile_photo_url": None,
+                "bio": None,
+                "address": None,
+                "lat": None,
+                "lng": None,
+                "discovery_opt_in": True,
+                "visibility": "neighbors",
+                "household_id": None,
+                "interests": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+            ref = db.collection("users").document(uid)
+            ref.set(profile)
+            print(f"ℹ️  Auto-created user profile for {uid} on GET /users/me (dev mode convenience)")
+        else:
+            # Default behavior: missing user => 404
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User profile not found for uid={uid}"
+            )
     
     # Normalize household field: prefer householdId (new), fallback to household_id (old)
     household_id_value = None
