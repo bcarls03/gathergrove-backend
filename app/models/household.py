@@ -22,6 +22,16 @@ class Kid(BaseModel):
         None,
         description="Child's age range (backward compatibility fallback)"
     )
+    birth_year: Optional[int] = Field(
+        None,
+        description="Child's birth year (for precise age reconstruction)"
+    )
+    birth_month: Optional[int] = Field(
+        None,
+        ge=1,
+        le=12,
+        description="Child's birth month 1-12 (for precise age reconstruction)"
+    )
     gender: Optional[Literal["male", "female", "prefer_not_to_say"]] = Field(
         None,
         description="Child's gender (optional)"
