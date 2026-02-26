@@ -75,6 +75,42 @@ def _get_user_profile(uid: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _get_or_create_user_profile(uid: str, email: str) -> Dict[str, Any]:
+    """
+    Get user profile from Firestore, or create it if missing.
+    Used by PATCH /users/me to make onboarding idempotent.
+    
+    Returns: User profile dict (existing or newly created)
+    """
+    profile = _get_user_profile(uid)
+    if profile:
+        return profile
+    
+    # Profile doesn't exist - create with defaults
+    now = _now()
+    profile = {
+        "uid": uid,
+        "email": email,
+        "first_name": "",
+        "last_name": "",
+        "profile_photo_url": None,
+        "bio": None,
+        "address": None,
+        "lat": None,
+        "lng": None,
+        "discovery_opt_in": True,
+        "visibility": "neighbors",
+        "household_id": None,
+        "interests": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    ref = db.collection("users").document(uid)
+    ref.set(profile)
+    print(f"ℹ️  Auto-created user profile for {uid} in PATCH /users/me (onboarding)")
+    return profile
+
+
 def _get_household(household_id: str) -> Optional[Dict[str, Any]]:
     """
     Get household from Firestore.
@@ -334,19 +370,16 @@ def patch_my_profile(
     """
     PATCH /users/me - Update current user's profile.
     
+    Idempotent: Auto-creates profile if missing (useful for onboarding).
     Validates fields and rejects unknown fields (422).
     Empty body returns 400.
     """
     uid = claims["uid"]
+    email = claims.get("email", f"{uid}@example.com")
     is_admin = claims.get("admin", False)
     
-    # Check if user exists
-    profile = _get_user_profile(uid)
-    if not profile:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User profile not found"
-        )
+    # Get or create user profile (idempotent for onboarding)
+    profile = _get_or_create_user_profile(uid, email)
     
     # Get update dict (only non-None fields)
     updates = body.dict(exclude_none=True)
