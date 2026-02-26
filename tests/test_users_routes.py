@@ -124,6 +124,27 @@ def test_get_profile_not_found(client, set_claims):
 
 # ==================== Update Profile Tests ====================
 
+def test_update_profile_autocreates_if_missing(client, set_claims):
+    """Test that PATCH /users/me auto-creates profile if missing (idempotent for onboarding)."""
+    set_claims(uid="onboarding_user_new", email="onboarding@example.com")
+    
+    # PATCH without creating user first (simulates onboarding flow)
+    response = client.patch("/users/me", json={
+        "discovery_opt_in": True,
+        "visibility": "neighbors"
+    })
+    
+    # Should succeed (auto-create profile)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["uid"] == "onboarding_user_new"
+    assert data["email"] == "onboarding@example.com"
+    assert data["discovery_opt_in"] is True
+    assert data["visibility"] == "neighbors"
+    assert data["first_name"] == ""  # Default value
+    assert data["last_name"] == ""   # Default value
+
+
 def test_update_profile(client, set_claims):
     """Test that PATCH /users/me updates user profile."""
     # Create user first
