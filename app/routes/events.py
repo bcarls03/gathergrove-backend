@@ -735,6 +735,16 @@ def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
         raise HTTPException(status_code=409, detail="Event is canceled")
 
     uid = claims["uid"]
+    
+    # ✅ HOST RESTRICTION: Hosts cannot RSVP to their own events (implicitly "Going")
+    # Check both new (host_user_id) and legacy (hostUid) fields
+    host_uid = ev.get("host_user_id") or ev.get("hostUid")
+    if host_uid and host_uid == uid:
+        raise HTTPException(
+            status_code=403,
+            detail="Event hosts cannot RSVP. You are automatically marked as attending your own events."
+        )
+    
     now = _now()
 
     # Capacity applies to "going" only
@@ -764,8 +774,19 @@ def leave_event(event_id: str, claims=Depends(verify_token)):
     ev_snap = ev_ref.get()
     if not ev_snap or not ev_snap.exists:
         raise HTTPException(status_code=404, detail="Event not found")
-
+    
+    ev = ev_snap.to_dict() or {}
     uid = claims["uid"]
+    
+    # ✅ HOST RESTRICTION: Hosts cannot leave their own events (always attending)
+    # Check both new (host_user_id) and legacy (hostUid) fields
+    host_uid = ev.get("host_user_id") or ev.get("hostUid")
+    if host_uid and host_uid == uid:
+        raise HTTPException(
+            status_code=403,
+            detail="Event hosts cannot leave RSVPs. Hosts are always attending."
+        )
+    
     rid = f"{event_id}_{uid}"
     coll = db.collection("event_attendees")
     ref = coll.document(rid)

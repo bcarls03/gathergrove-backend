@@ -133,15 +133,16 @@ def test_rsvp_join_leave_and_capacity_409():
     start = now + timedelta(days=7, hours=10)
     end = start + timedelta(hours=2)
 
+    # Create event as default user (host)
     ev = create_future_event("Cap1", start, end, capacity=1)
     eid = ev["id"]
 
-    # User A joins
-    r = client.post(f"/events/{eid}/rsvp", headers=auth(), json={"status": "going"})
+    # User A (non-host) joins
+    r = client.post(f"/events/{eid}/rsvp", headers=auth("user-a"), json={"status": "going"})
     assert r.status_code == 200
 
     # Listing for A shows count=1, attending=true
-    row = next(e for e in client.get("/events?type=future", headers=auth()).json()["items"] if e["id"] == eid)
+    row = next(e for e in client.get("/events?type=future", headers=auth("user-a")).json()["items"] if e["id"] == eid)
     assert row["attendeeCount"] == 1
     assert row["isAttending"] is True
 
@@ -150,7 +151,7 @@ def test_rsvp_join_leave_and_capacity_409():
     assert r.status_code == 409
 
     # A leaves → OK
-    r = client.delete(f"/events/{eid}/rsvp", headers=auth())
+    r = client.delete(f"/events/{eid}/rsvp", headers=auth("user-a"))
     assert r.status_code == 200
 
     # Now B can join
@@ -300,3 +301,48 @@ def test_guest_rsvp_to_public_event(client):
     assert "guest_id" in rsvp_body
     assert "rsvp_id" in rsvp_body
     assert rsvp_body["message"] == "RSVP received! Thank you."
+
+
+def test_host_cannot_rsvp_to_own_event():
+    """Test that event hosts cannot RSVP to their own events (403)"""
+    now = datetime.now(UTC)
+    start = now + timedelta(days=1)
+    end = start + timedelta(hours=2)
+
+    # Create event as host
+    ev = create_future_event("Host Event", start, end)
+    eid = ev["id"]
+
+    # Host tries to RSVP → should fail with 403
+    r = client.post(f"/events/{eid}/rsvp", headers=auth(), json={"status": "going"})
+    assert r.status_code == 403
+    detail = r.json().get("detail", "")
+    assert "cannot rsvp" in detail.lower()
+    assert "automatically" in detail.lower()
+
+    # Different user can RSVP successfully
+    r = client.post(f"/events/{eid}/rsvp", headers=auth("other-user"), json={"status": "going"})
+    assert r.status_code == 200
+
+
+def test_host_cannot_leave_own_event():
+    """Test that event hosts cannot delete their RSVP (403)"""
+    now = datetime.now(UTC)
+    start = now + timedelta(days=1)
+    end = start + timedelta(hours=2)
+
+    # Create event as host
+    ev = create_future_event("Host Event 2", start, end)
+    eid = ev["id"]
+
+    # Host tries to leave → should fail with 403
+    r = client.delete(f"/events/{eid}/rsvp", headers=auth())
+    assert r.status_code == 403
+    detail = r.json().get("detail", "")
+    assert "cannot leave" in detail.lower()
+    assert "always attending" in detail.lower()
+
+    # Other user can RSVP and then leave
+    client.post(f"/events/{eid}/rsvp", headers=auth("other-user"), json={"status": "going"})
+    r = client.delete(f"/events/{eid}/rsvp", headers=auth("other-user"))
+    assert r.status_code == 200
