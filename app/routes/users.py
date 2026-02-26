@@ -375,7 +375,7 @@ def patch_my_profile(
     Empty body returns 400.
     """
     uid = claims["uid"]
-    email = claims.get("email", f"{uid}@example.com")
+    email = claims.get("email") or ""
     is_admin = claims.get("admin", False)
     
     # Get or create user profile (idempotent for onboarding)
