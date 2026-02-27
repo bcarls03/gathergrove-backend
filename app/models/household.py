@@ -93,6 +93,10 @@ class Household(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="When household was last updated"
     )
+    onboarding_completed_at: Optional[datetime] = Field(
+        None,
+        description="When household completed onboarding (immutable, for KPI tracking)"
+    )
     
     class Config:
         json_schema_extra = {
