@@ -107,6 +107,7 @@ class UserProfileUpdate(BaseModel):
     address: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    location_precision: Optional[Literal["street", "zipcode"]] = None
     discovery_opt_in: Optional[bool] = None
     visibility: Optional[Literal["private", "neighbors", "public"]] = None
     household_id: Optional[str] = None
