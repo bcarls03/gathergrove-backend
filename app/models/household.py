@@ -84,6 +84,12 @@ class Household(BaseModel):
         description="List of children in household (age ranges only, no names)"
     )
     
+    # Neighborhood (optional)
+    neighborhood: Optional[str] = Field(
+        None,
+        description="Neighborhood name for discovery"
+    )
+    
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -132,6 +138,7 @@ class HouseholdCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     household_type: Literal["family_with_kids", "empty_nesters", "singles_couples"]
     kids: Optional[list[Kid]] = None
+    neighborhood: Optional[str] = None
     
     class Config:
         json_schema_extra = {
@@ -156,6 +163,7 @@ class HouseholdUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     household_type: Optional[Literal["family_with_kids", "empty_nesters", "singles_couples"]] = None
     kids: Optional[list[Kid]] = None
+    neighborhood: Optional[str] = None
 
 
 class HouseholdOut(BaseModel):
@@ -167,5 +175,6 @@ class HouseholdOut(BaseModel):
     member_uids: list[str]
     household_type: Optional[str] = None
     kids: Optional[list[Kid]] = None
+    neighborhood: Optional[str] = None
     created_at: datetime
     updated_at: datetime
