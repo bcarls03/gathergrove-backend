@@ -64,12 +64,6 @@ class UserProfile(BaseModel):
         description="User interests for discovery filtering (e.g., hiking, cooking)"
     )
     
-    # Neighborhood context (optional)
-    neighborhood_name: Optional[str] = Field(
-        None,
-        description="Optional neighborhood name for user context (not verified)"
-    )
-    
     # Timestamps
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
@@ -118,7 +112,6 @@ class UserProfileUpdate(BaseModel):
     visibility: Optional[Literal["private", "neighbors", "public"]] = None
     household_id: Optional[str] = None
     interests: Optional[list[str]] = None
-    neighborhood_name: Optional[str] = None
 
 
 class UserSignupRequest(BaseModel):
@@ -171,9 +164,6 @@ class UserProfileOut(BaseModel):
     
     # Interests
     interests: Optional[list[str]] = None
-    
-    # Neighborhood context
-    neighborhood_name: Optional[str] = None
     
     # Timestamps
     created_at: datetime

@@ -102,7 +102,6 @@ def _get_or_create_user_profile(uid: str, email: str) -> Dict[str, Any]:
         "visibility": "neighbors",
         "household_id": None,
         "interests": None,
-        "neighborhood_name": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -169,7 +168,6 @@ def signup_user(
         "visibility": "neighbors",  # Default
         "household_id": None,  # No household yet
         "interests": None,
-        "neighborhood_name": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -214,7 +212,6 @@ def get_my_profile(claims=Depends(verify_token)):
                 "visibility": "neighbors",
                 "household_id": None,
                 "interests": None,
-                "neighborhood_name": None,
                 "created_at": now,
                 "updated_at": now,
             }
@@ -698,7 +695,6 @@ def update_my_profile(
             "visibility": "neighbors",
             "household_id": None,
             "interests": None,
-            "neighborhood_name": None,
             "created_at": now,
             "updated_at": now,
         }
@@ -733,8 +729,6 @@ def update_my_profile(
         updates["household_id"] = body.household_id
     if body.interests is not None:
         updates["interests"] = body.interests
-    if body.neighborhood_name is not None:
-        updates["neighborhood_name"] = body.neighborhood_name
     
     if not updates:
         raise HTTPException(
@@ -789,7 +783,6 @@ def create_household(
             "visibility": "neighbors",
             "householdId": None,  # ✅ Use camelCase to match connections.py
             "interests": None,
-            "neighborhood_name": None,
             "created_at": now,
             "updated_at": now,
         }
