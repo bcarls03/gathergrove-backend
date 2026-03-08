@@ -815,6 +815,7 @@ def create_household(
         "member_uids": [uid],  # Current user is first member
         "household_type": body.household_type,
         "kids": [kid.dict() for kid in body.kids] if body.kids else None,
+        "neighborhood": body.neighborhood,
         "created_at": now,
         "updated_at": now,
     }
