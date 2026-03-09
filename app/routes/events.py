@@ -432,7 +432,10 @@ def create_event(body: EventIn, claims=Depends(verify_token)):
 @router.get("/events", summary="List upcoming and happening-now events")
 def list_events(
     type: Optional[str] = Query(None, pattern="^(now|future)$"),
-    neighborhood: Optional[str] = Query(None),
+    # ⚠️ ARCHITECTURE WARNING: Do not use neighborhood for product filtering
+    # Events should be discovered by time/proximity, not neighborhood labels
+    # This parameter exists for legacy compatibility only
+    neighborhood: Optional[str] = Query(None, description="[LEGACY] Do not use for product filtering"),
     category: Optional[Category] = Query(None),
     limit: int = Query(20, ge=1, le=50),
     nextPageToken: Optional[str] = Query(None),

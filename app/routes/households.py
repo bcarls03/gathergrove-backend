@@ -45,7 +45,10 @@ def _list_docs(coll):
 
 @router.get("/households", summary="List households (filterable)")
 def list_households(
-    neighborhood: Optional[str] = Query(None, description="Neighborhood name"),
+    # ⚠️ ARCHITECTURE WARNING: Frontend must NOT use neighborhood for filtering
+    # Neighborhood labels are context-only display fields, not structural filters
+    # This parameter exists for legacy/testing compatibility only
+    neighborhood: Optional[str] = Query(None, description="[LEGACY] Neighborhood name - do not use for product filtering"),
     household_type: Optional[str] = Query(
         None,
         alias="type",
