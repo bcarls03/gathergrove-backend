@@ -357,6 +357,11 @@ class UserPatchModel(BaseModel):
     bio: Optional[str] = None
     discovery_opt_in: Optional[bool] = None
     visibility: Optional[str] = None
+    # Location fields (for onboarding)
+    address: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+    location_precision: Optional[str] = None
     
     class Config:
         extra = 'forbid'  # Reject unknown fields with 422
@@ -809,6 +814,8 @@ def create_household(
         "household_type": body.household_type,
         "kids": [kid.dict() for kid in body.kids] if body.kids else None,
         "neighborhood": body.neighborhood,
+        "latitude": profile.get("lat"),
+        "longitude": profile.get("lng"),
         "created_at": now,
         "updated_at": now,
     }
