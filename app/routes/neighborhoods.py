@@ -5,6 +5,20 @@ from app.core.firebase import db
 router = APIRouter(tags=["neighborhoods"])
 
 
+def _normalize_for_grouping(text: str) -> str:
+    """
+    Normalize neighborhood name for grouping/matching only.
+    Used to aggregate similar variants (e.g., "Bay Hill" and "Bayhill").
+    Does NOT mutate stored data.
+    """
+    import re
+    # lowercase, strip, collapse whitespace, remove spaces for grouping
+    normalized = text.lower().strip()
+    normalized = re.sub(r'\s+', ' ', normalized)  # collapse repeated spaces
+    normalized = normalized.replace(' ', '')  # remove spaces for grouping key
+    return normalized
+
+
 @router.get("/neighborhoods/suggestions", summary="Get neighborhood suggestions")
 def get_neighborhood_suggestions(
     prefix: str = Query(..., min_length=3, max_length=50),
@@ -22,13 +36,15 @@ def get_neighborhood_suggestions(
     - No auth required (returns only aggregate data, no identities)
     """
     try:
-        prefix_lower = prefix.strip().lower()
-        if len(prefix_lower) < 3:
+        # Normalize prefix for matching (handles spacing variations)
+        prefix_normalized = _normalize_for_grouping(prefix)
+        if len(prefix_normalized) < 3:
             return []
         
-        # Collect matching neighborhoods
+        # Collect matching neighborhoods with normalization
         coll = db.collection("households")
-        neighborhood_counts = {}
+        # Track normalized key -> {original variants -> count}
+        grouped_neighborhoods = {}
         
         for doc in coll.stream():
             data = doc.to_dict()
@@ -43,8 +59,9 @@ def get_neighborhood_suggestions(
             if not neighborhood or h_lat is None or h_lng is None:
                 continue
             
-            # Case-insensitive prefix match
-            if not neighborhood.lower().startswith(prefix_lower):
+            # Normalize both prefix and neighborhood for matching (handles spacing)
+            neighborhood_normalized = _normalize_for_grouping(neighborhood)
+            if not neighborhood_normalized.startswith(prefix_normalized):
                 continue
             
             # Calculate distance (simplified Haversine)
@@ -52,15 +69,28 @@ def get_neighborhood_suggestions(
             
             # Only include nearby households (within 5 miles)
             if distance_mi <= 5.0:
-                if neighborhood not in neighborhood_counts:
-                    neighborhood_counts[neighborhood] = 0
-                neighborhood_counts[neighborhood] += 1
+                # Use normalized key for grouping
+                norm_key = _normalize_for_grouping(neighborhood)
+                if norm_key not in grouped_neighborhoods:
+                    grouped_neighborhoods[norm_key] = {}
+                if neighborhood not in grouped_neighborhoods[norm_key]:
+                    grouped_neighborhoods[norm_key][neighborhood] = 0
+                grouped_neighborhoods[norm_key][neighborhood] += 1
+        
+        # Aggregate counts and pick most common variant for each group
+        final_neighborhoods = {}
+        for norm_key, variants in grouped_neighborhoods.items():
+            # Total count across all variants
+            total_count = sum(variants.values())
+            # Pick the most frequently used original variant as display name
+            most_common_variant = max(variants.items(), key=lambda x: x[1])[0]
+            final_neighborhoods[most_common_variant] = total_count
         
         # Sort by count descending, limit to 3
         suggestions = [
             {"name": name, "count": count}
             for name, count in sorted(
-                neighborhood_counts.items(),
+                final_neighborhoods.items(),
                 key=lambda x: -x[1]
             )[:3]
         ]
