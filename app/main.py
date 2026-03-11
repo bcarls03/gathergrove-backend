@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.firebase import db  # real Firestore OR dev fake when SKIP_* is set
 from app.deps.auth import verify_token  # auth lives here
-from app.routes import events, households, people, push, users, groups, connections, dev, invitations, threads, kpis, neighborhoods
+from app.routes import events, households, people, push, users, groups, connections, dev, invitations, threads, kpis, neighborhoods, notifications
 
 app = FastAPI(title="GatherGrove Backend", version="0.1.0")
 
@@ -282,6 +282,7 @@ app.include_router(neighborhoods.router)  # Neighborhood suggestions
 app.include_router(people.router)
 app.include_router(connections.router)
 app.include_router(threads.router)  # NEW: Messaging threads
+app.include_router(notifications.router)  # Notifications (in-app + push)
 app.include_router(kpis.router)  # KPI Dashboard (internal/admin)
 app.include_router(dev.router)  # ✅ Dev-only routes (seeding, testing)
 app.include_router(dev.legacy_router)  # ✅ Legacy /_dev prefix for backward compatibility
