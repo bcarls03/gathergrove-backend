@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from app.core.firebase import db
 from app.deps.auth import verify_token
 from app.models.connection import ConnectionRequest, ConnectionResponse
+from app.services import notification_service
+from app.models.notification import NotificationType
 
 router = APIRouter(tags=["connections"])
 
@@ -67,6 +69,44 @@ def _get_user_household_id(uid: str) -> Optional[str]:
         print(f"Error getting household ID for user {uid}: {e}")
     
     return None
+
+
+def _get_household_member_uids(household_id: str) -> List[str]:
+    """Get all member UIDs for a household."""
+    try:
+        hh_ref = db.collection("households").document(household_id)
+        if hasattr(hh_ref, "get"):  # real Firestore
+            hh_doc = hh_ref.get()
+            if hh_doc.exists:
+                hh_data = hh_doc.to_dict()
+                return hh_data.get("member_uids", [])
+        elif hasattr(hh_ref, "_doc"):  # dev fake
+            hh_data = hh_ref._doc
+            if hh_data:
+                return hh_data.get("member_uids", [])
+    except Exception as e:
+        print(f"Error getting household members for {household_id}: {e}")
+    
+    return []
+
+
+def _get_household_name(household_id: str) -> str:
+    """Get the display name for a household."""
+    try:
+        hh_ref = db.collection("households").document(household_id)
+        if hasattr(hh_ref, "get"):  # real Firestore
+            hh_doc = hh_ref.get()
+            if hh_doc.exists:
+                hh_data = hh_doc.to_dict()
+                return hh_data.get("name", "A neighbor")
+        elif hasattr(hh_ref, "_doc"):  # dev fake
+            hh_data = hh_ref._doc
+            if hh_data:
+                return hh_data.get("name", "A neighbor")
+    except Exception as e:
+        print(f"Error getting household name for {household_id}: {e}")
+    
+    return "A neighbor"
 
 
 # ---------------- routes ----------------
@@ -167,7 +207,7 @@ def list_connections(
 
 
 @router.post("/api/connections", summary="Send connection request")
-def create_connection(
+async def create_connection(
     request: ConnectionRequest = Body(...),
     claims=Depends(verify_token),
 ) -> Dict[str, Any]:
@@ -247,6 +287,26 @@ def create_connection(
     new_conn_ref = coll.document()
     new_conn_ref.set(connection_data)
     conn_id = new_conn_ref.id
+    
+    # Notify target household members
+    requester_name = _get_household_name(from_household_id)
+    target_member_uids = _get_household_member_uids(to_household_id)
+    
+    for target_uid in target_member_uids:
+        try:
+            await notification_service.create_and_send(
+                user_id=target_uid,
+                notification_type=NotificationType.CONNECTION_REQUEST,
+                title=f"{requester_name} wants to connect",
+                body="Tap to view profile and respond",
+                data={
+                    "connection_id": conn_id,
+                    "from_household_id": from_household_id,
+                }
+            )
+        except Exception as e:
+            # Log error but don't fail the connection creation
+            print(f"Failed to send connection notification to {target_uid}: {e}")
     
     return {
         "id": conn_id,

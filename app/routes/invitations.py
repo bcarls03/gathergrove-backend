@@ -24,6 +24,8 @@ from app.core.firebase import db
 from app.services.sms import sms_service
 from app.services.user_service import find_household_by_phone
 from app.utils.tokens import generate_rsvp_token
+from app.services import notification_service
+from app.models.notification import NotificationType
 
 router = APIRouter(prefix="/events", tags=["invitations"])
 
@@ -36,6 +38,44 @@ def _now_iso() -> str:
 def _format_event_time(dt: datetime) -> str:
     """Format datetime for SMS (e.g., 'Sat, Jan 25 at 3:00 PM')"""
     return dt.strftime("%a, %b %d at %I:%M %p")
+
+
+def _get_household_member_uids(household_id: str) -> list:
+    """Get all member UIDs for a household."""
+    try:
+        hh_ref = db.collection("households").document(household_id)
+        if hasattr(hh_ref, "get"):  # real Firestore
+            hh_doc = hh_ref.get()
+            if hh_doc.exists:
+                hh_data = hh_doc.to_dict()
+                return hh_data.get("member_uids", [])
+        elif hasattr(hh_ref, "_doc"):  # dev fake
+            hh_data = hh_ref._doc
+            if hh_data:
+                return hh_data.get("member_uids", [])
+    except Exception as e:
+        print(f"Error getting household members for {household_id}: {e}")
+    
+    return []
+
+
+def _get_household_name(household_id: str) -> str:
+    """Get the display name for a household."""
+    try:
+        hh_ref = db.collection("households").document(household_id)
+        if hasattr(hh_ref, "get"):  # real Firestore
+            hh_doc = hh_ref.get()
+            if hh_doc.exists:
+                hh_data = hh_doc.to_dict()
+                return hh_data.get("name", "A neighbor")
+        elif hasattr(hh_ref, "_doc"):  # dev fake
+            hh_data = hh_ref._doc
+            if hh_data:
+                return hh_data.get("name", "A neighbor")
+    except Exception as e:
+        print(f"Error getting household name for {household_id}: {e}")
+    
+    return "A neighbor"
 
 
 @router.post("/{event_id}/invitations", status_code=status.HTTP_201_CREATED)
@@ -77,6 +117,7 @@ async def create_invitations(
     
     invitations_created = []
     sms_sent_count = 0
+    notified_households = set()  # Track to prevent duplicate notifications
     
     # 1. Handle platform invites (household_ids)
     for household_id in invitation_data.household_ids:
@@ -103,8 +144,31 @@ async def create_invitations(
         db.collection("invitations").document(invitation_id).set(invitation)
         invitations_created.append(invitation)
         
-        # TODO: Send in-app notification
-        # await notification_service.send_event_invite(household_id, event_id)
+        # Send in-app notification to all household members (skip if already notified)
+        if household_id not in notified_households:
+            notified_households.add(household_id)
+            
+            event_title = event_data.get("title", "an event")
+            host_household_id = event_data.get("host_household_id", "")
+            host_name = _get_household_name(host_household_id) if host_household_id else "A neighbor"
+            
+            invitee_member_uids = _get_household_member_uids(household_id)
+            for invitee_uid in invitee_member_uids:
+                try:
+                    await notification_service.create_and_send(
+                        user_id=invitee_uid,
+                        notification_type=NotificationType.EVENT_INVITE,
+                        title=f"{host_name} invited you to {event_title}",
+                        body="Tap to view details and RSVP",
+                        data={
+                            "event_id": event_id,
+                            "invitation_id": invitation_id,
+                            "host_household_id": host_household_id,
+                        }
+                    )
+                except Exception as e:
+                    # Log error but don't fail invitation creation
+                    print(f"Failed to send event invitation notification to {invitee_uid}: {e}")
     
     # 2. Handle off-platform invites (phone numbers)
     for phone_number in invitation_data.phone_numbers:
@@ -135,8 +199,31 @@ async def create_invitations(
             db.collection("invitations").document(invitation_id).set(invitation)
             invitations_created.append(invitation)
             
-            # TODO: Send in-app notification
-            # await notification_service.send_event_invite(existing_household_id, event_id)
+            # Send in-app notification (skip if already notified from household_ids)
+            if existing_household_id not in notified_households:
+                notified_households.add(existing_household_id)
+                
+                event_title = event_data.get("title", "an event")
+                host_household_id = event_data.get("host_household_id", "")
+                host_name = _get_household_name(host_household_id) if host_household_id else "A neighbor"
+                
+                invitee_member_uids = _get_household_member_uids(existing_household_id)
+                for invitee_uid in invitee_member_uids:
+                    try:
+                        await notification_service.create_and_send(
+                            user_id=invitee_uid,
+                            notification_type=NotificationType.EVENT_INVITE,
+                            title=f"{host_name} invited you to {event_title}",
+                            body="Tap to view details and RSVP",
+                            data={
+                                "event_id": event_id,
+                                "invitation_id": invitation_id,
+                                "host_household_id": host_household_id,
+                            }
+                        )
+                    except Exception as e:
+                        # Log error but don't fail invitation creation
+                        print(f"Failed to send event invitation notification to {invitee_uid}: {e}")
             
         else:
             # New user - send SMS

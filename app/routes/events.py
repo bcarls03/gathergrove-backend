@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, constr, model_validator
 
 from app.core.firebase import db
 from app.deps.auth import verify_token  # ✅ avoid circular import
+from app.services import notification_service
+from app.models.notification import NotificationType
 
 router = APIRouter(tags=["events"])
 
@@ -173,6 +175,16 @@ def _normalize_neighborhood(household: Dict[str, Any]) -> Optional[str]:
         return s or None
     except Exception:
         return None
+
+
+def _get_household_name_from_uid(uid: str) -> str:
+    """Get display name for a household by looking up the user's household."""
+    household = _lookup_household(uid)
+    if household:
+        name = household.get("name") or household.get("last_name")
+        if name:
+            return str(name)
+    return "A neighbor"
 
 
 def _attendee_stats(event_id: str, uid: str) -> Dict[str, Any]:
@@ -725,7 +737,7 @@ def get_my_rsvp(event_id: str, claims=Depends(verify_token)):
 
 
 @router.post("/events/{event_id}/rsvp", summary="RSVP to an event (going/maybe/declined)")
-def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
+async def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     ev_ref = db.collection("events").document(event_id)
     ev_snap = ev_ref.get()
     if not ev_snap or not ev_snap.exists:
@@ -768,6 +780,37 @@ def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     snap = ref.get()
     data = snap.to_dict() or {}
     data["id"] = snap.id
+    
+    # Notify event host about RSVP (only if status is "going" or "maybe", skip "declined")
+    # Skip if: host is guest (redundant safety), or status unchanged (no new info)
+    should_notify = (
+        body.status in ["going", "maybe"] and 
+        host_uid and 
+        host_uid != uid and  # Don't notify host about themselves (safety)
+        already_status != body.status  # Only notify on status change
+    )
+    
+    if should_notify:
+        try:
+            event_title = ev.get("title", "your event")
+            guest_name = _get_household_name_from_uid(uid)
+            status_text = "is going" if body.status == "going" else "might attend"
+            
+            await notification_service.create_and_send(
+                user_id=host_uid,
+                notification_type=NotificationType.RSVP,
+                title=f"{guest_name} {status_text}",
+                body=f"RSVP for {event_title}",
+                data={
+                    "event_id": event_id,
+                    "guest_uid": uid,
+                    "rsvp_status": body.status,
+                }
+            )
+        except Exception as e:
+            # Log error but don't fail the RSVP
+            print(f"Failed to send RSVP notification to host {host_uid}: {e}")
+    
     return _jsonify(data)
 
 
