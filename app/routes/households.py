@@ -1,7 +1,6 @@
 # app/routes/households.py
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 
@@ -10,9 +9,6 @@ from app.core.firebase import db
 
 # ✅ IMPORTANT: do NOT import from app.main (circular risk)
 from app.deps.auth import verify_token  # dev/prod auth
-from app.services.geocoding import geocode_address
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["households"])
 
@@ -131,7 +127,7 @@ def list_households(
 
 
 @router.post("/households", summary="Create/update my household (by uid)")
-async def upsert_my_household(
+def upsert_my_household(
     payload: Dict[str, Any] = Body(...),
     claims=Depends(verify_token),
 ):
@@ -152,27 +148,6 @@ async def upsert_my_household(
     # Always stamp uid/email from auth
     payload["uid"] = uid
     payload["email"] = claims.get("email")
-
-    # Geocode address if sufficient data is available
-    if payload.get("city") and payload.get("state"):
-        try:
-            geocode_result = await geocode_address(
-                street=payload.get("street_address") or payload.get("streetAddress"),
-                city=payload.get("city"),
-                state=payload.get("state"),
-                zip_code=payload.get("zip_code") or payload.get("zipCode")
-            )
-            
-            if geocode_result:
-                payload["latitude"] = geocode_result.latitude
-                payload["longitude"] = geocode_result.longitude
-                payload["formatted_address"] = geocode_result.formatted_address
-                logger.info(f"Geocoded household address: {geocode_result.formatted_address}")
-            else:
-                logger.warning(f"Geocoding returned no results for city={payload.get('city')}, state={payload.get('state')}")
-        except Exception as e:
-            # Log but don't block household creation if geocoding fails
-            logger.error(f"Geocoding failed for household creation: {e}")
 
     doc_ref = db.collection("households").document(uid)
 
