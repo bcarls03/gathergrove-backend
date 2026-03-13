@@ -809,6 +809,7 @@ def create_household(
     
     household_data = {
         "id": household_id,
+        "uid": uid,  # Creator's uid for self-household filtering
         "name": body.name,
         "member_uids": [uid],  # Current user is first member
         "household_type": body.household_type,
