@@ -63,6 +63,7 @@ class _FakeColl:
         self._root = root
         self._docs = root.setdefault(name, {})
         self._where_filters = []
+        self._order_by_field = None
 
     def document(self, doc_id: Optional[str] = None) -> _FakeDoc:
         """Get or create a document reference.
@@ -82,10 +83,20 @@ class _FakeColl:
         """Simple where clause for filtering documents"""
         new_coll = _FakeColl(self.name, self._root)
         new_coll._where_filters = self._where_filters + [(field, op, value)]
+        new_coll._order_by_field = self._order_by_field
+        return new_coll
+    
+    def order_by(self, field: str):
+        """Order results by field (ascending only for simplicity)"""
+        new_coll = _FakeColl(self.name, self._root)
+        new_coll._where_filters = self._where_filters
+        new_coll._order_by_field = field
         return new_coll
     
     def stream(self):
         """Stream documents matching where filters"""
+        results = []
+        
         for doc_id, doc_data in self._docs.items():
             if doc_data is None:
                 continue
@@ -101,7 +112,14 @@ class _FakeColl:
                 # Add other operators as needed
             
             if matches:
-                yield _FakeSnap(doc_id, doc_data)
+                results.append((doc_id, doc_data))
+        
+        # Apply ordering if specified
+        if self._order_by_field:
+            results.sort(key=lambda x: x[1].get(self._order_by_field, 0))
+        
+        for doc_id, doc_data in results:
+            yield _FakeSnap(doc_id, doc_data)
 
 
 class _FakeDB:
