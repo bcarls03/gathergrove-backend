@@ -781,10 +781,10 @@ async def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
     data = snap.to_dict() or {}
     data["id"] = snap.id
     
-    # Notify event host about RSVP (only if status is "going" or "maybe", skip "declined")
+    # Notify event host about RSVP for any status change (going, maybe, or declined)
     # Skip if: host is guest (redundant safety), or status unchanged (no new info)
     should_notify = (
-        body.status in ["going", "maybe"] and 
+        body.status in ["going", "maybe", "declined"] and
         host_uid and 
         host_uid != uid and  # Don't notify host about themselves (safety)
         already_status != body.status  # Only notify on status change
@@ -794,7 +794,16 @@ async def rsvp_event(event_id: str, body: RSVPIn, claims=Depends(verify_token)):
         try:
             event_title = ev.get("title", "your event")
             guest_name = _get_household_name_from_uid(uid)
-            status_text = "is going" if body.status == "going" else "might attend"
+            
+            # Map RSVP status to user-friendly notification text
+            if body.status == "going":
+                status_text = "is going"
+            elif body.status == "maybe":
+                status_text = "replied maybe"
+            elif body.status == "declined":
+                status_text = "can't make it"
+            else:
+                status_text = "responded"  # Safe fallback for unknown statuses
             
             await notification_service.create_and_send(
                 user_id=host_uid,
