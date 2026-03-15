@@ -8,6 +8,7 @@ class NotificationType:
     EVENT_INVITE = "event_invite"
     RSVP = "rsvp"
     CONNECTION_REQUEST = "connection_request"
+    CONNECTION_ACCEPTED = "connection_accepted"
     EVENT_REPLY = "event_reply"
 
 

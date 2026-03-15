@@ -319,7 +319,7 @@ async def create_connection(
 
 
 @router.patch("/api/connections/{connection_id}", summary="Accept or decline connection")
-def update_connection(
+async def update_connection(
     connection_id: str,
     response: ConnectionResponse = Body(...),
     claims=Depends(verify_token),
@@ -374,6 +374,31 @@ def update_connection(
     }
     
     conn_ref.update(updates) if hasattr(conn_ref, "update") else conn_ref.set({**conn_data, **updates})
+    
+    # Send notification to requester when connection is accepted
+    if response.status == "accepted":
+        from_household_id = conn_data.get("from_household_id")
+        if from_household_id:
+            # Get responder's household name
+            responder_name = _get_household_name(household_id)
+            # Get requester household member UIDs
+            requester_member_uids = _get_household_member_uids(from_household_id)
+            
+            for requester_uid in requester_member_uids:
+                try:
+                    await notification_service.create_and_send(
+                        user_id=requester_uid,
+                        notification_type=NotificationType.CONNECTION_ACCEPTED,
+                        title=f"{responder_name} accepted your connection request",
+                        body="You're now connected!",
+                        data={
+                            "connection_id": connection_id,
+                            "from_household_id": household_id,
+                        }
+                    )
+                except Exception as e:
+                    # Log error but don't fail the connection acceptance
+                    print(f"Failed to send acceptance notification to {requester_uid}: {e}")
     
     return {
         "id": connection_id,
