@@ -8,6 +8,7 @@ class NotificationType:
     EVENT_INVITE = "event_invite"
     RSVP = "rsvp"
     CONNECTION_REQUEST = "connection_request"
+    EVENT_REPLY = "event_reply"
 
 
 class NotificationCreate(BaseModel):
